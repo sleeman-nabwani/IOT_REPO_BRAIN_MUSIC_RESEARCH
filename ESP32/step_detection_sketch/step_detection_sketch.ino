@@ -69,11 +69,13 @@ void loop() {
   unsigned long now =  millis();
   bool stepDetected = false;
   int stepFootId = 0;
+
   //getting the fsr reading of the sensors:
   int rightFsr = analogRead(RIGHT_PIN);
   int leftFsr = analogRead(LEFT_PIN);
   Serial.println("pressure:");
   Serial.println(rightFsr);
+
   //resetting the flags:
   if(rightFsr <= THRESHOLD - pressureBuffer)
     rightFlag = false;
@@ -106,7 +108,5 @@ void loop() {
       Serial.println("error sending the message");
       Serial.println(result);
     }
-
-    delay(10);
   }
 }
