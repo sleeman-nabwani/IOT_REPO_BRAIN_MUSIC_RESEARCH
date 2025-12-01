@@ -38,7 +38,7 @@ def main():
 
 if __name__ == "__main__":
     main()
-=======
+#=======
 from song import MidiBeatSync
 import time
 import random
