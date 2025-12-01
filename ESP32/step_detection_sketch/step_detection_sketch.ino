@@ -16,7 +16,7 @@ const uint8_t LEFT = 2;
 
 //defining a step event:
 typedef struct {
-  uint32_t time;
+  uint32_t intervalMS;
   uint8_t footId;
 } StepEvent;
 
@@ -26,7 +26,7 @@ StepEvent stepEvent;
 const int THRESHOLD = 700;
 const int pressureBuffer = 300;
 
-unsigned long lastStepTime = 0;
+uint32_t lastStepTime = 0;
 
 
 //foot pressure:
@@ -66,16 +66,14 @@ void setup() {
 
 void loop() {
   //getting the current time:
-  unsigned long now =  millis();
+  uint32_t now =  millis();
   bool stepDetected = false;
   int stepFootId = 0;
-
   //getting the fsr reading of the sensors:
   int rightFsr = analogRead(RIGHT_PIN);
   int leftFsr = analogRead(LEFT_PIN);
   Serial.println("pressure:");
   Serial.println(rightFsr);
-
   //resetting the flags:
   if(rightFsr <= THRESHOLD - pressureBuffer)
     rightFlag = false;
@@ -95,10 +93,11 @@ void loop() {
   }
 
   if(stepDetected){
-    lastStepTime = now;
+    
     //sending step event using esp_now:
     Serial.println(rightFsr);
-    stepEvent.time = now;
+    stepEvent.intervalMS = now - lastStepTime;
+    lastStepTime = now;
     stepEvent.footId = stepFootId;
     esp_err_t result = esp_now_send(receiverMac, (uint8_t*)&stepEvent, sizeof(StepEvent));
     if(result == ESP_OK){
