@@ -1,81 +1,64 @@
-from song import MidiBeatSync
+from midi_player import MidiBeatSync
 import time
-import random
+import serial
+import argparse
+from logger import Logger
 
-def main():
-    midi_path = r"C:\Users\USER\Desktop\Celine_Dion_-_All_By_Myself.mid"
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Brain-music demo player")
+    parser.add_argument(
+        "midi_path",
+        nargs="?",
+        default=None,
+        help="Path to the MIDI file to play",
+    )
+    return parser.parse_args()
 
-    # create player
+
+def main(midi_path:str):
+    # initializing the midi player
     player = MidiBeatSync(midi_path)
-
-    # generator (plays 1 MIDI message each next())
     playback = player.play()
-
-    # current simulated BPM
-    current_bpm = player.songBPM
-    player.set_BPM(current_bpm)
-
-    # time window before BPM changes
-    next_change_time = time.time() + random.uniform(2, 7)
+    
+    # initializing the logger
+    logger = Logger()
+    logger.log(f"Session started at {time.time()}")
+    #opening the serial port for communication with the ESP32
+    ser = serial.Serial("COM3", 115200, timeout=0.01)
+    logger.log(f"Serial port opened at {time.time()} on port{ser.port}, baud {ser.baudrate}")
 
     while True:
         try:
             next(playback)  # play one MIDI event
         except StopIteration:
-            break  # end of song
-
-        # if it’s time to change BPM
-        if time.time() >= next_change_time:
-            # simulate “sensor sending a new BPM”
-            new_bpm = random.randint(60, 500)
-            print(f"Sensor update → walking BPM = {new_bpm}")
-
-            player.set_BPM(new_bpm)
-
-            # next sensor reading in 2–7 seconds
-            next_change_time = time.time() + random.uniform(2, 7)
-
-
-if __name__ == "__main__":
-    main()
-#=======
-from song import MidiBeatSync
-import time
-import random
-
-def main():
-    midi_path = r"C:\Users\USER\Desktop\Celine_Dion_-_All_By_Myself.mid"
-
-    # create player
-    player = MidiBeatSync(midi_path)
-
-    # generator (plays 1 MIDI message each next())
-    playback = player.play()
-
-    # current simulated BPM
-    current_bpm = player.songBPM
-    player.set_BPM(current_bpm)
-
-    # time window before BPM changes
-    next_change_time = time.time() + random.uniform(2, 7)
-
-    while True:
+            logger.log(f"Song finished at {time.time()}. Restarting...")
+            playback = player.play()
+            continue
+        logger.log(f"MIDI event played at {time.time()}")
+        
+        raw_line = ser.readline()
+        if not raw_line:
+            continue
+        
+        step = raw_line.decode("utf-8", errors="ignore").strip()
         try:
-            next(playback)  # play one MIDI event
-        except StopIteration:
-            break  # end of song
+            ts_str, foot_str, interval_str, bpm_str = step.split(",")
 
-        # if it’s time to change BPM
-        if time.time() >= next_change_time:
-            # simulate “sensor sending a new BPM”
-            new_bpm = random.randint(60, 500)
-            print(f"Sensor update → walking BPM = {new_bpm}")
+            ts = int(ts_str)
+            foot = int(foot_str)
+            interval = int(interval_str)
+            bpm = float(bpm_str)
 
-            player.set_BPM(new_bpm)
+            # use it:
+            player.set_BPM(bpm)
+            logger.log(f"{ts}, {foot}, {interval}, {bpm}")
 
-            # next sensor reading in 2–7 seconds
-            next_change_time = time.time() + random.uniform(2, 7)
+        except ValueError:
+            continue
 
-
+        logger.log_csv(time.time(), player.songBPM, bpm)
+        logger.log(f"Step received at {time.time()}: {step}")
+    logger.log(f"Session ended at {time.time()}")
+    player.close()
 if __name__ == "__main__":
-    main()
+    main(parse_args().midi_path)
