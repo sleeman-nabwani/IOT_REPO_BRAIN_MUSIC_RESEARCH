@@ -118,7 +118,7 @@ void onDataRecv(const uint8_t * mac, const uint8_t *incomingData, int len) {
 void setup() {
   Serial.begin(115200);
   pinMode(LED_BUILTIN, OUTPUT);
-digitalWrite(LED_BUILTIN, LOW);
+  digitalWrite(LED_BUILTIN, LOW);
   WiFi.mode(WIFI_STA);
 
   if (esp_now_init() != ESP_OK) {
