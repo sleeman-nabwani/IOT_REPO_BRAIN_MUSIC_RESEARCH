@@ -27,7 +27,7 @@ class Logger:
         #creating the csv file
         with self.csv_path.open("w", newline="", encoding="utf-8") as handle:
             csv_writer = writer(handle)
-            csv_writer.writerow(["time", "song_bpm", "walking_bpm"])
+            csv_writer.writerow(["time", "song_bpm", "walking_bpm", "step_event"])
 
     def _elapsed_str(self, timestamp: float | None = None) -> str:
         if timestamp is None:
@@ -41,8 +41,9 @@ class Logger:
             handle.write(stamped + "\n")
         print(stamped)
             
-    def log_csv(self, timestamp: float, song_bpm: float, walking_bpm: float):
+    def log_csv(
+        self, timestamp: float, song_bpm: float, walking_bpm: float, step_event: bool = False):
         elapsed = self._elapsed_str(timestamp)
         with self.csv_path.open("a", newline="", encoding="utf-8") as handle:
             csv_writer = writer(handle)
-            csv_writer.writerow([elapsed, song_bpm, walking_bpm])
+            csv_writer.writerow([elapsed, song_bpm, walking_bpm, step_event])
