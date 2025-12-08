@@ -35,29 +35,57 @@ def _elapsed_to_seconds(value: str) -> float:
 def plot_data(df, folder):
     df = df.copy()
     df["seconds"] = df["time"].apply(_elapsed_to_seconds)
-    df["delta"] = df["song_bpm"] - df["walking_bpm"]
+    if "step_event" in df.columns:
+        df["step_event"] = (
+            df["step_event"].astype(str).str.lower().isin(["true", "1", "yes"])
+        )
+    else:
+        df["step_event"] = True
+
+    step_indices = df.index[df["step_event"]]
+    if len(step_indices) > 0:
+        start_seconds = df.loc[step_indices[0], "seconds"]
+    else:
+        non_zero = df["walking_bpm"].to_numpy() != 0
+        start_seconds = (
+            df.loc[non_zero, "seconds"].iloc[0] if non_zero.any() else df["seconds"].iloc[0]
+        )
+    post_step_mask = df["seconds"] >= start_seconds
+    nan_value = float("nan")
+    df["walking_plot"] = df["walking_bpm"].where(post_step_mask, nan_value)
+    df["delta"] = (df["song_bpm"] - df["walking_bpm"]).where(post_step_mask, nan_value)
     df["abs_delta"] = df["delta"].abs()
 
-    mean_abs_delta = df["abs_delta"].mean()
-    max_abs_delta = df["abs_delta"].max()
-    p95_abs_delta = df["abs_delta"].quantile(0.95)
-
+    mean_abs_delta = df["abs_delta"].mean(skipna=True)
+    max_abs_delta = df["abs_delta"].max(skipna=True)
     stats_msg = (
         "Tracking error stats (song - walking BPM)\n"
         f"mean |Δ| = {mean_abs_delta:.2f} BPM\n"
-        f"max  |Δ| = {max_abs_delta:.2f} BPM\n"
-        f"p95  |Δ| = {p95_abs_delta:.2f} BPM"
+        f"max  |Δ| = {max_abs_delta:.2f} BPM"
     )
     print(stats_msg.replace("\n", " | "))
 
     fig, axes = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
 
     axes[0].plot(
-        df["seconds"], df["walking_bpm"], label="Walking BPM (sensor)", color="#1f77b4"
+        df["seconds"], df["walking_plot"], label="Walking BPM (sensor)", color="#1f77b4"
     )
     axes[0].plot(
         df["seconds"], df["song_bpm"], label="Song BPM (player)", color="#ff7f0e"
     )
+    if df["step_event"].any():
+        axes[0].scatter(
+            df.loc[df["step_event"], "seconds"],
+            df.loc[df["step_event"], "walking_bpm"],
+            label="Step events",
+            color="#2ca02c",
+            s=18,
+            alpha=0.6,
+            zorder=3,
+            marker="o",
+            edgecolors="white",
+            linewidths=0.3,
+        )
     axes[0].set_ylabel("BPM")
     axes[0].set_title(f"BPM Tracking\n{folder.name}")
     axes[0].legend()

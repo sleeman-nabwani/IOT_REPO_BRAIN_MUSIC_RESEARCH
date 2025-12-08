@@ -10,7 +10,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "midi_path",
         nargs="?",
-        default=None,
+        default="midi_files\Technion_March1.mid",
         help="Path to the MIDI file to play",
     )
     return parser.parse_args()
@@ -59,7 +59,7 @@ def main(midi_path:str):
         
         current_ts = time.time()
         bpm_estimation.update_recorded_values(current_ts, bpm)
-        logger.log_csv(current_ts, player.walkingBPM, bpm)
+        logger.log_csv(current_ts, player.walkingBPM, bpm, step_event=True)
         player.set_BPM(bpm)
         logger.log(f"Step received: {step}")
     logger.log("Session ended")
