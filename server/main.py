@@ -35,7 +35,6 @@ def main(midi_path:str):
             logger.log("Song finished. Restarting...")
             playback = player.play()
             continue
-        logger.log("MIDI event played")
         
         raw_line = ser.readline()
         if not raw_line:

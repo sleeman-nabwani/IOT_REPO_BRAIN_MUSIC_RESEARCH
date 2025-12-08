@@ -11,7 +11,7 @@ class MidiBeatSync :
 
         if self.songBPM is None:
             raise ValueError("This MIDI file has no tempo. ERROR")
-
+    
         self.walkingBPM = self.songBPM
         self.TempoFactor = 1.0
         self.outport = mido.open_output()
