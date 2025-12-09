@@ -10,10 +10,42 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "midi_path",
         nargs="?",
-        default="midi_files\Technion_March1.mid",
+        default=None,
         help="Path to the MIDI file to play",
     )
     return parser.parse_args()
+
+def session_handshake(ser: serial.Serial, logger: Logger) -> bool:
+    """Perform RESET/START handshake with bounded retries."""
+    ser.reset_input_buffer()
+
+    for _ in range(5):
+        ser.write(b"RESET\n")
+        time.sleep(0.1)
+        resp = ser.readline()
+        decoded = resp.decode("utf-8", errors="ignore").strip() if resp else ""
+        if decoded == "ACK,RESET":
+            logger.log("Reset ACK received")
+            break
+        logger.log(f"Unexpected or no ACK to RESET (got: {decoded!r}), retrying...")
+    else:
+        logger.log("RESET handshake failed")
+        return False
+
+    for _ in range(5):
+        ser.write(b"START\n")
+        time.sleep(0.1)
+        resp = ser.readline()
+        decoded = resp.decode("utf-8", errors="ignore").strip() if resp else ""
+        if decoded == "ACK,START":
+            logger.log("Start ACK received")
+            logger.log("Session handshake completed")
+            ser.timeout = 0.05
+            return True
+        logger.log(f"Unexpected or no ACK to START (got: {decoded!r}), retrying...")
+
+    logger.log("START handshake failed")
+    return False
 
 def main(midi_path:str):
     # initializing the midi player
@@ -25,9 +57,11 @@ def main(midi_path:str):
     bpm_estimation = BPM_estimation(player, logger)
     logger.log("Session started")
     #opening the serial port for communication with the ESP32
-    ser = serial.Serial("COM3", 115200, timeout=0.01)
-    logger.log(f"Serial port opened on port {ser.port}, baud {ser.baudrate}")
-
+    ser = serial.Serial("COM3", 115200, timeout=0.2)
+    if not session_handshake(ser, logger):
+        logger.log("Handshake failed; aborting session")
+        return
+    #main loop
     while True:
         try:
             next(playback)
@@ -42,6 +76,7 @@ def main(midi_path:str):
             continue
         
         step = raw_line.decode("utf-8", errors="ignore").strip()
+        logger.log(f"Step received: {step}")
         try:
             ts_str, foot_str, interval_str, bpm_str = step.split(",")
 
@@ -61,7 +96,7 @@ def main(midi_path:str):
         bpm_estimation.update_recorded_values(current_ts, bpm)
         logger.log_csv(current_ts, player.walkingBPM, bpm, step_event=True)
         player.set_BPM(bpm)
-        logger.log(f"Step received: {step}")
+        logger.log("Step has been processed")
     logger.log("Session ended")
     player.close()
 if __name__ == "__main__":
