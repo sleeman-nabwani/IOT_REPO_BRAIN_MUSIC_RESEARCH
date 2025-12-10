@@ -160,16 +160,14 @@ void loop() {
     int foot;
     float bpm;
 
-    //incase of starting a new session:
     if (sessionStarted) {
-      interval = now - sessionStartTime;
-      bpm = 60000.0 / interval;
-      currentStep.intervalMS = interval;
-      foot = currentStep.footId;
-      addNode(currentStep);
+      // First step after START: signal detection but ignore its timing for BPM
       sessionStarted = false;
+      lastStepRecvTime = now;
+      interval = 0;
+      foot = currentStep.footId;
+      bpm = 0.0;
     }
-    //otherwise:
     else {
       //Unpack Data (Only what you have)
       interval = currentStep.intervalMS;
