@@ -10,7 +10,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "midi_path",
         nargs="?",
-        default=None,
+        default="midi_files\Technion_March1.mid",
         help="Path to the MIDI file to play",
     )
     return parser.parse_args()
