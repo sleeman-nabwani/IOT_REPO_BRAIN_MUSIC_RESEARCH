@@ -26,12 +26,12 @@ class BPM_estimation:
     def update_bpm(self):
        # if in manual mode there is no need to update the bpm
         if self.manual_mode:
-        return
+            return 
     
         # if no step-based BPM has been recorded yet, skip slowdown
         if self.last_recorded_bpm <= 0:
             return
-          
+        
         interval = time.time() - self.last_msg_time
         if interval <= 0:
             return
