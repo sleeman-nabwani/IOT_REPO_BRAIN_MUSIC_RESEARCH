@@ -14,8 +14,13 @@ class BPM_estimation:
         self.last_recorded_bpm = last_recorded_bpm
 
     def update_bpm(self):
+        # if no step-based BPM has been recorded yet, skip slowdown
+        if self.last_recorded_bpm <= 0:
+            return
         interval = time.time() - self.last_msg_time
-        current_bpm = 60/interval
+        if interval <= 0:
+            return
+        current_bpm = 60 / interval
         if self.player.walkingBPM > current_bpm:
             self.player.set_BPM(current_bpm)
             self.logger.log(f"BPM updated from {self.player.walkingBPM} to {current_bpm}")
