@@ -13,9 +13,10 @@ from main import main
 
 class TestManualMode(unittest.TestCase):
     
+    @patch('BPM_estimation.BPM_estimation.check_manual_bpm_update')
     @patch('serial.Serial')
-    def test_manual_mode_120bpm(self, mock_serial_cls):
-        print("\n--- Starting Simulation Test: MANUAL 120 BPM ---")
+    def test_manual_mode_120bpm(self, mock_serial_cls, mock_check_bpm):
+        print("\n--- Starting Simulation Test: MANUAL Song -> 200 BPM ---")
         
         # 1. Setup Mock Serial Instance
         mock_serial = MagicMock()
@@ -23,7 +24,23 @@ class TestManualMode(unittest.TestCase):
         mock_serial.port = "MOCK_PORT"
         mock_serial.baudrate = 115200
 
-        # 2. Configure Logic for Manual 120 BPM
+        # Logic for check_manual_bpm_update:
+        # Return 200.0 ONCE after 10 seconds.
+        bpm_update_sent = False
+        start_time_ref = time.time()
+        
+        def bpm_check_side_effect(*args, **kwargs):
+            nonlocal bpm_update_sent
+            elapsed = time.time() - start_time_ref
+            if elapsed > 10.0 and not bpm_update_sent:
+                bpm_update_sent = True
+                print(f"[SIM] >>>> SIMULATING GUI UPDATE: SET BPM TO 200 <<<<")
+                return 200.0
+            return None
+
+        mock_check_bpm.side_effect = bpm_check_side_effect
+
+        # 3. Configure Logic for Manual Mode
         args = argparse.Namespace()
         
         # Absolute path to MIDI
@@ -32,9 +49,10 @@ class TestManualMode(unittest.TestCase):
         
         # KEY SETTINGS:
         args.manual = True
-        args.bpm = None  # <--- Use Default Song BPM
+        args.bpm = None  # <--- Start with Default Song BPM
         
         start_time = time.time()
+        start_time_ref = start_time # Sync the side effect time
         
         # State for mock walker
         state = {
@@ -42,25 +60,16 @@ class TestManualMode(unittest.TestCase):
             "step_count": 0
         }
 
-        # 3. Define non-blocking readline behavior
-        # Use a flag to ensure command is sent only once
-        cmd_sent = False
-        
-        def side_effect():
-            nonlocal cmd_sent
+        # 4. Define non-blocking readline behavior
+        def serial_read_side_effect():
             current_time = time.time()
             elapsed = current_time - start_time
             
-            # Scenario:
-            # 0-10s: Normal Manual Mode (Song BPM)
-            # 10s:   User sends command to CHANGE Manual BPM to 200
+            if elapsed > 15.0:
+                print("\n[SIM] Timeout reached (15s), stopping simulation.")
+                raise KeyboardInterrupt
             
-            if elapsed >= 10 and not cmd_sent:
-                cmd_sent = True
-                print(f"[SIM] >>>> SENDING COMMAND: CHANGE MANAUL BPM TO 200 <<<<")
-                return b"CMD:BPM:200\n"
-
-            # Simulate a walker (BPM doesn't matter for the music, but logs need valid lines)
+            # Simulate a walker
             walker_bpm = 100.0
             step_interval_sec = 60.0 / walker_bpm
             
@@ -70,18 +79,17 @@ class TestManualMode(unittest.TestCase):
                 state["step_count"] += 1
                 
                 if state["step_count"] % 10 == 0:
-                     print(f"[SIM] Time {elapsed:.1f}s | Walker: {walker_bpm} BPM | Mode: MANUAL (Music should be constant)")
+                     print(f"[SIM] Time {elapsed:.1f}s | Walker: {walker_bpm} BPM")
 
                 foot = 1 if state["step_count"] % 2 == 0 else 0
                 line = f"{current_time},{foot},{int(step_interval_sec*1000)},{walker_bpm}"
                 return line.encode("utf-8")
             
-            # Non-blocking return
             return b""
 
-        mock_serial.readline.side_effect = side_effect
+        mock_serial.readline.side_effect = serial_read_side_effect
 
-        # 4. Run Main
+        # 5. Run Main
         try:
             main(args)
         except KeyboardInterrupt:

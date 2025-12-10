@@ -44,7 +44,7 @@ def main(args):
     
     # initializing the logger
     logger = Logger()
-    bpm_estimation = BPM_estimation(player, logger)
+    bpm_estimation = BPM_estimation(player, logger, manual_mode=args.manual, manual_bpm=args.bpm)
     logger.log("Session started")
     #opening the serial port for communication with the ESP32
     ser = serial.Serial("COM3", 115200, timeout=0.01)
@@ -57,26 +57,22 @@ def main(args):
             logger.log("Song finished. Restarting...")
             playback = player.play()
             continue
-        
+
+
+        # Check for manual updates from GUI / I assumed that we will get the bpm from the gui directly into the constructor in the BPM_estimation file
+        new_manual_bpm = bpm_estimation.check_manual_bpm_update()
+        if new_manual_bpm is not None:
+             print(f"Applying manual BPM change to: {new_manual_bpm}")
+             player.set_BPM(new_manual_bpm)
+             logger.log(f"Manual BPM updated to {new_manual_bpm}")
+            
         raw_line = ser.readline()
         if not raw_line:
-            # Only decay BPM if we are in dynamic mode
             if not args.manual:
-                bpm_estimation.update_bpm(manual_mode=args.manual)
+                bpm_estimation.update_bpm()
             continue
         
         step = raw_line.decode("utf-8", errors="ignore").strip()
-        
-        # Check for control commands
-        if step.startswith("CMD:BPM:"): #check if we received an incoming command instead of a step
-            try:
-                new_bpm = float(step.split(":")[2])
-                print(f"\n[SERVER] Received Manual BPM Change Command: {new_bpm}")
-                player.set_BPM(new_bpm)
-                logger.log(f"Manual BPM updated to {new_bpm}")
-            except ValueError:
-                print(f"[SERVER] Invalid BPM command: {step}")
-            continue
 
         try:
             ts_str, foot_str, interval_str, bpm_str = step.split(",")
@@ -90,14 +86,13 @@ def main(args):
             logger.log(f"{ts}, {foot}, {interval}, {bpm}")
 
         except ValueError:
-            bpm_estimation.update_bpm(manual_mode=args.manual)
+            bpm_estimation.update_bpm()
             continue
         
         current_ts = time.time()
         bpm_estimation.update_recorded_values(current_ts, bpm)
         logger.log_csv(current_ts, player.walkingBPM, bpm, step_event=True)
         
-        # Only update player BPM if NOT in manual mode
         if not args.manual:
             player.set_BPM(bpm)
             
