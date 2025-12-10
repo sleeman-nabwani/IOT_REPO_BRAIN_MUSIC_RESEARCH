@@ -6,7 +6,7 @@ class MidiBeatSync :
 
     def __init__(self, midi_path):
         # loading the midi file
-        self.mid = mido.MidiFile(midi_path) 
+        self.mid = mido.MidiFile(midi_path)
         self.songBPM = self._extract_song_bpm()
 
         if self.songBPM is None:
@@ -34,8 +34,10 @@ class MidiBeatSync :
 
 
     def play(self):
+        # mido iterates messages with msg.time already in seconds (delta)
         for msg in self.mid:
-            time.sleep(msg.time * self.TempoFactor)
+            if msg.time > 0:
+                time.sleep(msg.time * self.TempoFactor)
             if not msg.is_meta:
                 self.outport.send(msg)
             yield

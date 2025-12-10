@@ -42,19 +42,10 @@ def plot_data(df, folder):
     else:
         df["step_event"] = True
 
-    step_indices = df.index[df["step_event"]]
-    if len(step_indices) > 0:
-        start_seconds = df.loc[step_indices[0], "seconds"]
-    else:
-        non_zero = df["walking_bpm"].to_numpy() != 0
-        start_seconds = (
-            df.loc[non_zero, "seconds"].iloc[0] if non_zero.any() else df["seconds"].iloc[0]
-        )
-    post_step_mask = df["seconds"] >= start_seconds
     nan_value = float("nan")
-    df["walking_plot"] = df["walking_bpm"].where(post_step_mask, nan_value)
-    df["delta"] = (df["song_bpm"] - df["walking_bpm"]).where(post_step_mask, nan_value)
-    df["abs_delta"] = df["delta"].abs()
+    df["walking_plot"] = df["walking_bpm"]
+    df["delta_step_only"] = (df["song_bpm"] - df["walking_bpm"]).where(df["step_event"], nan_value)
+    df["abs_delta"] = df["delta_step_only"].abs()
 
     mean_abs_delta = df["abs_delta"].mean(skipna=True)
     max_abs_delta = df["abs_delta"].max(skipna=True)
@@ -91,29 +82,49 @@ def plot_data(df, folder):
     axes[0].legend()
     axes[0].grid(True, alpha=0.3)
 
-    axes[1].plot(
-        df["seconds"], df["delta"], label="Δ = song - walking", color="#d62728"
-    )
+    step_mask = df["step_event"] & df["delta_step_only"].notna()
+    step_times = df.loc[step_mask, "seconds"]
+    step_deltas = df.loc[step_mask, "delta_step_only"]
+    pos_mask = step_deltas > 0
+    neg_mask = step_deltas < 0
+
+    # optional tolerance band for visual guidance (e.g., ±2 BPM)
+    tol = 2
     axes[1].fill_between(
-        df["seconds"],
-        df["delta"],
-        0,
-        where=df["delta"] >= 0,
-        color="#ff9896",
-        alpha=0.3,
-        interpolate=True,
-        label="Song faster",
+        step_times,
+        -tol,
+        tol,
+        color="#f2f2f2",
+        alpha=0.6,
+        step="mid",
+        label="±2 BPM band",
     )
-    axes[1].fill_between(
-        df["seconds"],
-        df["delta"],
-        0,
-        where=df["delta"] < 0,
-        color="#9edae5",
-        alpha=0.3,
-        interpolate=True,
-        label="Song slower",
-    )
+
+    if pos_mask.any():
+        axes[1].scatter(
+            step_times[pos_mask],
+            step_deltas[pos_mask],
+            label="Song faster",
+            color="#d62728",
+            s=22,
+            alpha=0.75,
+            edgecolors="white",
+            linewidths=0.35,
+            marker="o",
+        )
+    if neg_mask.any():
+        axes[1].scatter(
+            step_times[neg_mask],
+            step_deltas[neg_mask],
+            label="Song slower",
+            color="#1f77b4",
+            s=22,
+            alpha=0.75,
+            edgecolors="white",
+            linewidths=0.35,
+            marker="o",
+        )
+
     axes[1].axhline(0, color="black", linewidth=0.8, linestyle="--")
     axes[1].set_xlabel("Time (s)")
     axes[1].set_ylabel("Δ BPM (song - walking)")
