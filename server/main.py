@@ -17,6 +17,8 @@ def parse_args() -> argparse.Namespace:
 
 def session_handshake(ser: serial.Serial, logger: Logger) -> bool:
     """Perform RESET/START handshake with bounded retries."""
+    # allow the ESP to finish boot messages, then clear the buffer
+    time.sleep(0.5)
     ser.reset_input_buffer()
 
     for _ in range(5):
@@ -40,7 +42,6 @@ def session_handshake(ser: serial.Serial, logger: Logger) -> bool:
         if decoded == "ACK,START":
             logger.log("Start ACK received")
             logger.log("Session handshake completed")
-            ser.timeout = 0.05
             return True
         logger.log(f"Unexpected or no ACK to START (got: {decoded!r}), retrying...")
 
@@ -50,10 +51,9 @@ def session_handshake(ser: serial.Serial, logger: Logger) -> bool:
 def main(midi_path:str):
     # initializing the midi player
     player = MidiBeatSync(midi_path)
-    playback = player.play()
-    
     # initializing the logger
     logger = Logger()
+    #initializing the bpm estimation
     bpm_estimation = BPM_estimation(player, logger)
     logger.log("Session started")
     #opening the serial port for communication with the ESP32
@@ -61,6 +61,11 @@ def main(midi_path:str):
     if not session_handshake(ser, logger):
         logger.log("Handshake failed; aborting session")
         return
+    # runtime serial reads should be non-blocking to avoid slowing playback
+    ser.timeout = 0
+    
+    #starting the playback
+    playback = player.play()
     #main loop
     while True:
         try:
@@ -84,6 +89,11 @@ def main(midi_path:str):
             foot = int(foot_str)
             interval = int(interval_str)
             bpm = float(bpm_str)
+
+            # If the first step arrives with zeroed timing/BPM, assume current song tempo
+            if interval == 0 and bpm == 0.0:
+                bpm = player.walkingBPM
+                interval = int(60000 / bpm) if bpm > 0 else 0
 
             # use it:
             logger.log(f"{ts}, {foot}, {interval}, {bpm}")
