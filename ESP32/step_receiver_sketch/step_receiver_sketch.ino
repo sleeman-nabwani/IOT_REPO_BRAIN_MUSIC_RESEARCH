@@ -5,7 +5,9 @@
 // ==== SETTINGS ====
 const int SMOOTHING_WINDOW = 3;  // Steps to average for BPM
 const int TIMEOUT_MS = 10000;     // Reset BPM if no steps for 3 seconds
-
+bool sessionStarted = false;
+bool sessionStarting = true;
+uint32_t sessionStartTime = 0;
 // ==== STRUCTS ====
 
 // 1. The Data Packet
@@ -132,21 +134,50 @@ void setup() {
 // ==== LOOP ====
 void loop() {
   unsigned long now = millis();
-
+  
+  // Process all pending commands from PC
+  while (Serial.available()) {
+    String command = Serial.readStringUntil('\n');
+    command.trim();
+    //if the command is RESET(to make the esp listen for starting command):
+    if (command == "RESET") {
+      sessionStarting = true;
+      Serial.println("ACK,RESET");
+    //if the command is START(to start a new session):
+    } else if (command == "START" && sessionStarting) {
+      clearList();
+      sessionStarting = false;
+      sessionStarted = true;
+      sessionStartTime = now;
+      Serial.println("ACK,START");
+    }
+  }
+  //if a step is received:
   if (messageRecv) {
     messageRecv = false;
     lastStepRecvTime = now;
+    uint32_t interval;
+    int foot;
+    float bpm;
 
-    // 1. Unpack Data (Only what you have)
-    uint32_t interval = currentStep.intervalMS;
-    int foot = currentStep.footId;
-    float bpm = 0.0;
-
-    // 2. Filter & List Management
-    if (interval > 2500 || interval < 100) {
-      clearList(); // Reset if stopped
-    } 
+    if (sessionStarted) {
+      // First step after START: signal detection but ignore its timing for BPM
+      sessionStarted = false;
+      lastStepRecvTime = now;
+      interval = 0;
+      foot = currentStep.footId;
+      bpm = 0.0;
+    }
     else {
+      //Unpack Data (Only what you have)
+      interval = currentStep.intervalMS;
+      foot = currentStep.footId;
+      bpm = 0.0;
+
+      //Filter & List Management
+      if (interval > 2500)
+        clearList(); // Reset if stopped
+
       // Add new step to Linked List
       addNode(currentStep);
 
@@ -158,8 +189,8 @@ void loop() {
       // Calculate BPM using the List Function
       bpm = calculateAverageBPM();
     }
-
-    // 3. Send to PC
+    
+    //Send to PC
     // Format: Timestamp, Foot, Interval, BPM
     Serial.print(now);
     Serial.print(", ");
@@ -169,16 +200,17 @@ void loop() {
     Serial.print(", ");
     Serial.println(bpm, 2);
 
-    // 4. LED Blink
+    //LED Blink
     digitalWrite(LED_BUILTIN, HIGH);
     delay(50);
     digitalWrite(LED_BUILTIN, LOW);
   }
 
-  // 5. Timeout Check
-  // If we haven't heard a step in 3 seconds, clear list and send 0
+  //Timeout check (disabled: keep previous BPM when footfalls pause briefly)
+  /*
   if (stepHistory.listSize > 0 && (now - lastStepRecvTime > TIMEOUT_MS)) {
     clearList(); 
     Serial.println("0,0,0,0.0"); // Zeros matching your format
   }
+  */
 }
