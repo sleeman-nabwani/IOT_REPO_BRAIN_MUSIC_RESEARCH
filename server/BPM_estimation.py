@@ -13,7 +13,10 @@ class BPM_estimation:
         self.last_msg_time = last_msg_time
         self.last_recorded_bpm = last_recorded_bpm
 
-    def update_bpm(self):
+    def update_bpm(self, manual_mode=False):
+        if manual_mode:
+            return
+            
         interval = time.time() - self.last_msg_time
         current_bpm = 60/interval
         if self.player.walkingBPM > current_bpm:
