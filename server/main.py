@@ -7,6 +7,7 @@ from BPM_estimation import BPM_estimation
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Brain-music demo player")
+    # TWEAK: Change the default MIDI file here if you want a different song by default.
     parser.add_argument(
         "midi_path",
         nargs="?",
@@ -58,41 +59,75 @@ def session_handshake(ser: serial.Serial, logger: Logger) -> bool:
     logger.log("START handshake failed")
     return False
   
-def main(args):
+def main(args, status_callback=print, stop_event=None, session_dir_callback=None):
     midi_path = args.midi_path
+    
+    # Callback wrapper to handle both print and GUI logging
+    def log(msg):
+        if status_callback: status_callback(msg)
+
     # initializing the midi player  
     player = MidiBeatSync(midi_path)
     
     #checking if in manual mode:
     if args.manual:
-        print(f"Starting in MANUAL MODE.")
+        log(f"Starting in MANUAL MODE.")
         if args.bpm:
-            print(f"Setting fixed BPM to {args.bpm}")
+            log(f"Setting fixed BPM to {args.bpm}")
             player.set_BPM(args.bpm)
         else:
-             print(f"Using default song BPM: {player.songBPM}")
+             log(f"Using default song BPM: {player.songBPM}")
     else:
-        print(f"Starting in DYNAMIC MODE")
+        log(f"Starting in DYNAMIC MODE")
 
     playback = player.play()
     
     # initializing the logger:
     logger = Logger()
+    if session_dir_callback:
+        session_dir_callback(logger.path)
+        
     #initializing the bpm estimation:
     bpm_estimation = BPM_estimation(player, logger, manual_mode=args.manual, manual_bpm=args.bpm)
     logger.log("Session started")
+    
     #opening the serial port for communication with the ESP32
-    ser = serial.Serial("COM3", 115200, timeout=0.2)
+    # Use args.serial_port if available, else default
+    port = getattr(args, 'serial_port', "COM3")
+    
+    ser = None
+    try:
+        ser = serial.Serial(port, 115200, timeout=0.2)
+    except Exception as e:
+        log(f"Failed to open serial port {port}: {e}")
+        return player, logger, bpm_estimation
+
     if not session_handshake(ser, logger):
         logger.log("Handshake failed; aborting session")
-        return
+        log("Handshake failed.")
+        return player, logger, bpm_estimation
+
     # runtime serial reads should be non-blocking to avoid slowing playback
     ser.timeout = 0
     
     #starting the playback
     playback = player.play()
-    #main loop
+    log("Session running...")
+    
+    # ==================================================================================
+    # MAIN LOOP
+    # This loop runs as fast as possible to:
+    # 1. Play the next note in the MIDI file.
+    # 2. Check for manual BPM changes (from GUI).
+    # 3. Read step data from the Serial Port.
+    # 4. Adjust the song tempo if needed.
+    # ==================================================================================
     while True:
+        # CHECK STOP EVENT
+        if stop_event and stop_event.is_set():
+            logger.log("Session stopped by user.")
+            break
+
         try:
             next(playback)
         except StopIteration:
@@ -101,10 +136,10 @@ def main(args):
             continue
 
 
-        # Check for manual updates from GUI / I assumed that we will get the bpm from the gui directly into the constructor in the BPM_estimation file
+        # Check for manual updates from GUI
         new_manual_bpm = bpm_estimation.check_manual_bpm_update()
         if new_manual_bpm is not None:
-             print(f"Applying manual BPM change to: {new_manual_bpm}")
+             log(f"Applying manual BPM change to: {new_manual_bpm}")
              player.set_BPM(new_manual_bpm)
              logger.log(f"Manual BPM updated to {new_manual_bpm}")
             
@@ -144,7 +179,11 @@ def main(args):
             player.set_BPM(bpm)
             
         logger.log("Step has been processed")
+    
     logger.log("Session ended")
     player.close()
+    if ser: ser.close()
+    return player, logger, bpm_estimation
+
 if __name__ == "__main__":
     main(parse_args())

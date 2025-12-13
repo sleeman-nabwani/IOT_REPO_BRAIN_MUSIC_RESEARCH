@@ -1,0 +1,6 @@
+pandas
+matplotlib
+pyserial
+numpy
+mido
+python-rtmidi

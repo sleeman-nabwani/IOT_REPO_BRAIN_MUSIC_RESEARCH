@@ -3,7 +3,13 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 from sys import exit
 
+# ==================================================================================
+# STATIC UTILITY FUNCTIONS
+# These handle finding the log files on disk and converting timestamps.
+# ==================================================================================
+
 def find_latest_session_folder():
+    """Locates the most recently created session folder in the /logs directory."""
     logs_dir = Path(__file__).resolve().parent / "logs"
     if not logs_dir.exists():
         raise FileNotFoundError("No 'logs' folder found.")
@@ -32,7 +38,29 @@ def _elapsed_to_seconds(value: str) -> float:
     return float(hours) * 3600 + float(minutes) * 60 + float(seconds)
 
 
-def plot_data(df, folder):
+def generate_post_session_plot(folder_path):
+    """
+    Reads the CSV from the given session folder and saves a static PNG plot.
+    This is called by the GUI when the session stops.
+    """
+    folder = Path(folder_path)
+    csv_path = folder / "session_data.csv"
+    if not csv_path.exists():
+        print(f"No CSV found in {folder}, skipping plot.")
+        return
+
+    try:
+        df = pd.read_csv(csv_path)
+        save_static_plot(df, folder)
+    except Exception as e:
+        print(f"Failed to generate plot: {e}")
+
+
+def save_static_plot(df, folder):
+    """
+    Generates a Matplotlib figure from the data and saves it as a PNG file.
+    Does NOT show the window (non-blocking).
+    """
     df = df.copy()
     df["seconds"] = df["time"].apply(_elapsed_to_seconds)
     if "step_event" in df.columns:
@@ -146,8 +174,145 @@ def plot_data(df, folder):
     fig.savefig(fig_path, dpi=150, bbox_inches="tight")
     print(f"Plot saved to {fig_path}")
 
-    plt.show()
+    fig_path = folder / "BPM_plot.png"
+    fig.savefig(fig_path, dpi=150, bbox_inches="tight")
+    print(f"Plot saved to {fig_path}")
+    
+    # Clean up memory
     plt.close(fig)
+
+
+# ==================================================================================
+# LIVE PLOTTER CLASS
+# This class manages the real-time drawing of the graph in the GUI.
+# It uses an "Optimized Update" strategy (lines.set_data) to prevent flickering.
+# ==================================================================================
+
+class LivePlotter:
+    def __init__(self, ax1, ax2, theme_colors):
+        """
+        Initialize the plotter with the two axes (plots) and the color theme.
+        ax1: Top plot (BPM)
+        ax2: Bottom plot (Delta/Sync)
+        """
+        self.ax1 = ax1
+        self.ax2 = ax2
+        self.P = theme_colors
+        
+        # Persistent Line Objects
+        # We store these so we can just update their data later instead of recreating them.
+        self.line_walker = None
+        self.line_song = None
+        
+        # Delta Plot Objects (Scatter for steps)
+        self.scat_delta_pos = None
+        self.scat_delta_neg = None
+        self.fill_tolerance = None
+        self.scat_steps = None
+        
+        # Apply the initial grid/labels/colors once at startup
+        self._style_axes(self.ax1, "LIVE BPM TRACE", "BPM", show_x=False)
+        self._style_axes(self.ax2, "SYNC DELTA (Dots = Steps)", "Delta (Song - Walking)", show_x=True)
+
+    def _style_axes(self, ax, title, ylabel, show_x=False):
+        """Applies the dark theme, grid lines, and removes borders for a clean look."""
+        P = self.P
+        ax.set_facecolor(P["card_bg"])
+        ax.set_title(title, color=P["text_sub"], fontsize=9, fontweight="bold", loc="left", pad=10)
+        ax.set_ylabel(ylabel, color=P["text_sub"], fontsize=8)
+        
+        for s in ["top", "right", "left"]: 
+            ax.spines[s].set_visible(False)
+        ax.spines["bottom"].set_color(P["border"])
+        
+        ax.tick_params(axis='x', colors=P["text_sub"], labelsize=8)
+        ax.tick_params(axis='y', colors=P["text_sub"], labelsize=8)
+        ax.yaxis.grid(True, color=P["border"], ls='--', alpha=0.5)
+        ax.xaxis.grid(False)
+        
+        if show_x:
+            ax.set_xlabel("Time (s)", color=P["text_sub"], fontsize=8)
+        else:
+            ax.tick_params(axis='x', labelbottom=False, bottom=False)
+
+    def update(self, df):
+        """
+        Called every 100ms by the GUI.
+        Receives a pandas DataFrame 'df' with the latest session data.
+        Updates the graph lines efficiently.
+        """
+        t = df["seconds"]
+        w = df["walking_bpm"]
+        s = df["song_bpm"]
+        
+        # --- PLOT 1: BPM (Top) ---
+        if self.line_walker is None:
+            # First run: Initialize the Line2D objects
+            self.line_walker, = self.ax1.plot(t, w, color="#3b82f6", lw=2, label="Walker")
+            self.line_song, = self.ax1.plot(t, s, color="#10b981", lw=2, ls="--", label="Music")
+            self.ax1.legend(facecolor=self.P["card_bg"], labelcolor="white", frameon=False, fontsize=8)
+        else:
+            # Subsequent runs: Just update x and y data (Fast!)
+            self.line_walker.set_data(t, w)
+            self.line_song.set_data(t, s)
+            
+        # Re-calculate limits so the graph zooms out as time passes
+        self.ax1.relim()
+        self.ax1.autoscale_view()
+
+        # Scatter points (Footsteps)
+        # For scatter, it's easier to remove and redraw the collection than update it.
+        if self.scat_steps: self.scat_steps.remove()
+        if df["step_event"].any(): 
+            sub = df[df["step_event"]]
+            self.scat_steps = self.ax1.scatter(sub["seconds"], sub["walking_bpm"], color="white", s=15, zorder=5)
+
+        # --- PLOT 2: DELTA (Bottom) ---
+        # Calculate Delta ONLY where step_event is True
+        # We need the full delta array for indexing, but we only plot points at step events
+        
+        # 1. Background Tolerance Band (+/- 2 BPM)
+        # We redraw this to fit the time axis
+        if self.fill_tolerance: self.fill_tolerance.remove()
+        self.fill_tolerance = self.ax2.fill_between(t, -2, 2, color="#f2f2f2", alpha=0.1, label="Tolerance (±2)")
+
+        # 2. Scatter Points
+        # Filter data for steps
+        if self.scat_delta_pos: self.scat_delta_pos.remove()
+        if self.scat_delta_neg: self.scat_delta_neg.remove()
+        
+        if df["step_event"].any():
+            step_mask = df["step_event"]
+            step_times = df.loc[step_mask, "seconds"]
+            step_deltas = df.loc[step_mask, "song_bpm"] - df.loc[step_mask, "walking_bpm"]
+            
+            # Split into Positive (Song Faster - Red) and Negative (Song Slower - Blue)
+            pos_mask = step_deltas > 0
+            neg_mask = step_deltas < 0
+            
+            if pos_mask.any():
+                self.scat_delta_pos = self.ax2.scatter(
+                    step_times[pos_mask], step_deltas[pos_mask],
+                    color="#ef4444", s=20, label="Song Faster", zorder=5
+                )
+                
+            if neg_mask.any():
+                self.scat_delta_neg = self.ax2.scatter(
+                    step_times[neg_mask], step_deltas[neg_mask],
+                    color="#3b82f6", s=20, label="Song Slower", zorder=5
+                )
+
+        self.ax2.axhline(0, color=self.P["text_sub"], ls="--", lw=1, alpha=0.3)
+        self.ax2.relim()
+        self.ax2.autoscale_view()
+        
+        # Update Legend (Only if handlers exist)
+        # We do this every frame to ensure labels are correct if points appear/disappear
+        handles, labels = self.ax2.get_legend_handles_labels()
+        # Filter duplicates in legend
+        by_label = dict(zip(labels, handles))
+        self.ax2.legend(by_label.values(), by_label.keys(), facecolor=self.P["card_bg"], labelcolor="white", frameon=False, fontsize=8, loc="upper right")
+
 
 if __name__ == "__main__":
     try:
