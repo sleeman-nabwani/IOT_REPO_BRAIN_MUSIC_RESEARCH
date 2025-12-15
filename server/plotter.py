@@ -71,12 +71,23 @@ def save_static_plot(df, folder):
         df["step_event"] = True
 
     nan_value = float("nan")
-    df["walking_plot"] = df["walking_bpm"]
-    df["delta_step_only"] = (df["song_bpm"] - df["walking_bpm"]).where(df["step_event"], nan_value)
+    df["walking_plot"] = pd.to_numeric(df["walking_bpm"], errors='coerce')
+    df["song_bpm"] = pd.to_numeric(df["song_bpm"], errors='coerce')
+    
+    # Calculate delta
+    df["delta_step_only"] = (df["song_bpm"] - df["walking_plot"]).where(df["step_event"], nan_value)
     df["abs_delta"] = df["delta_step_only"].abs()
 
-    mean_abs_delta = df["abs_delta"].mean(skipna=True)
-    max_abs_delta = df["abs_delta"].max(skipna=True)
+    # Safe stats calculation
+    try:
+        mean_abs_delta = df["abs_delta"].mean(skipna=True)
+        max_abs_delta = df["abs_delta"].max(skipna=True)
+        if pd.isna(mean_abs_delta): mean_abs_delta = 0.0
+        if pd.isna(max_abs_delta): max_abs_delta = 0.0
+    except:
+        mean_abs_delta = 0.0
+        max_abs_delta = 0.0
+
     stats_msg = (
         "Tracking error stats (song - walking BPM)\n"
         f"mean |Δ| = {mean_abs_delta:.2f} BPM\n"
@@ -204,9 +215,8 @@ class LivePlotter:
         self.line_walker = None
         self.line_song = None
         
-        # Delta Plot Objects (Scatter for steps)
-        self.scat_delta_pos = None
-        self.scat_delta_neg = None
+        # Delta Plot Objects (Line)
+        self.line_delta = None
         self.fill_tolerance = None
         self.scat_steps = None
         
@@ -241,9 +251,17 @@ class LivePlotter:
         Receives a pandas DataFrame 'df' with the latest session data.
         Updates the graph lines efficiently.
         """
-        t = df["seconds"]
-        w = df["walking_bpm"]
-        s = df["song_bpm"]
+        # Ensure numeric types (handle "2400.00" strings or NaNs)
+        t = pd.to_numeric(df["seconds"], errors='coerce')
+        w = pd.to_numeric(df["walking_bpm"], errors='coerce')
+        s = pd.to_numeric(df["song_bpm"], errors='coerce')
+        
+        # Drop rows where critical data is NaN to prevent plotting errors
+        # (Optional: fillna(0) if preferred, but dropping is cleaner for graphs)
+        valid_mask = t.notna() & w.notna() & s.notna()
+        t = t[valid_mask]
+        w = w[valid_mask]
+        s = s[valid_mask]
         
         # --- PLOT 1: BPM (Top) ---
         if self.line_walker is None:
@@ -276,31 +294,12 @@ class LivePlotter:
         if self.fill_tolerance: self.fill_tolerance.remove()
         self.fill_tolerance = self.ax2.fill_between(t, -2, 2, color="#f2f2f2", alpha=0.1, label="Tolerance (±2)")
 
-        # 2. Scatter Points
-        # Filter data for steps
-        if self.scat_delta_pos: self.scat_delta_pos.remove()
-        if self.scat_delta_neg: self.scat_delta_neg.remove()
-        
-        if df["step_event"].any():
-            step_mask = df["step_event"]
-            step_times = df.loc[step_mask, "seconds"]
-            step_deltas = df.loc[step_mask, "song_bpm"] - df.loc[step_mask, "walking_bpm"]
-            
-            # Split into Positive (Song Faster - Red) and Negative (Song Slower - Blue)
-            pos_mask = step_deltas > 0
-            neg_mask = step_deltas < 0
-            
-            if pos_mask.any():
-                self.scat_delta_pos = self.ax2.scatter(
-                    step_times[pos_mask], step_deltas[pos_mask],
-                    color="#ef4444", s=20, label="Song Faster", zorder=5
-                )
-                
-            if neg_mask.any():
-                self.scat_delta_neg = self.ax2.scatter(
-                    step_times[neg_mask], step_deltas[neg_mask],
-                    color="#3b82f6", s=20, label="Song Slower", zorder=5
-                )
+        # 2. Continuous Line Plot
+        delta = s - w
+        if self.line_delta is None:
+            self.line_delta, = self.ax2.plot(t, delta, color="#a855f7", lw=1.5, label="Sync Error") # Purple line
+        else:
+            self.line_delta.set_data(t, delta)
 
         self.ax2.axhline(0, color=self.P["text_sub"], ls="--", lw=1, alpha=0.3)
         self.ax2.relim()
@@ -317,7 +316,7 @@ class LivePlotter:
 if __name__ == "__main__":
     try:
         df, folder = load_latest_csv()
-        plot_data(df, folder)
+        save_static_plot(df, folder)
     except Exception as e:
         print(f"Error: {e}")
         plt.close()

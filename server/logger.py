@@ -12,9 +12,13 @@ def _format_elapsed(seconds: float) -> str:
     return f"{hours:02d}:{minutes:02d}:{secs:06.3f}"
 
 class Logger:
-    def __init__(self):
+    # NOTE: This logger is used both for the console and for the GUI.
+    #       It is initialized with a GUI callback if available.
+    def __init__(self, gui_callback=None):
         self.start_time = time.time()
         self.timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        self.gui_callback = gui_callback
+        
         #setting the path to the logs directory
         self.path = Path(__file__).resolve().parent / "logs" / f"session_{self.timestamp}"
         self.path.mkdir(parents=True, exist_ok=True)
@@ -40,6 +44,10 @@ class Logger:
         with self.file_path.open("a", encoding="utf-8") as handle:
             handle.write(stamped + "\n")
         print(stamped)
+        
+        # Update GUI if callback is provided
+        if self.gui_callback:
+            self.gui_callback(message)
             
     def log_csv(
         self, timestamp: float, song_bpm: float, walking_bpm: float, step_event: bool = False):

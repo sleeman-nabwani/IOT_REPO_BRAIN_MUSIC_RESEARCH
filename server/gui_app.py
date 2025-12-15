@@ -39,15 +39,18 @@ class SessionThread(threading.Thread):
     It imports and runs 'session_runner' logic in a separate process flow.
     It communicates back to the GUI using callbacks.
     """
-    def __init__(self, midi_path, serial_port, manual_mode, manual_bpm, log_callback, session_dir_callback):
+    def __init__(self, midi_path, serial_port, manual_mode, manual_bpm, smoothing_window, stride, log_callback, session_dir_callback):
         super().__init__(daemon=True) # Daemon means it dies when the main app closes
         self.midi_path = midi_path
         self.serial_port = serial_port
         self.manual_mode = manual_mode
         self.manual_bpm = manual_bpm
+        self.smoothing_window = smoothing_window # variable responsible of how many steps to average
+        self.stride = stride
         self.log_callback = log_callback # Function to send text back to GUI
         self.session_dir_callback = session_dir_callback # Function to send file path back
         self.stop_event = threading.Event()
+        self.command_queue = SimpleQueue() # Queue for ESP32 commands
         self.bpm_est = None
         self._pending_bpm = manual_bpm
         self._pending_manual_mode = manual_mode
@@ -67,8 +70,15 @@ class SessionThread(threading.Thread):
         self._pending_manual_mode = enabled
         if self.bpm_est: self.bpm_est.set_manual_mode(enabled)
         
-    def update_smoothing_alpha(self, alpha):
-        if self.bpm_est: self.bpm_est.set_smoothing_alpha(alpha)
+    def update_smoothing_alpha_up(self, alpha):
+        if self.bpm_est: self.bpm_est.set_smoothing_alpha_up(alpha)
+
+    def update_smoothing_alpha_down(self, alpha):
+        if self.bpm_est: self.bpm_est.set_smoothing_alpha_down(alpha)
+        
+    def update_esp_config(self, cmd_type, value):
+        # Directly queue to the comms queue, skipping BPM_estimation
+        self.command_queue.put((cmd_type, value))
 
     def stop(self):
         self.stop_event.set()
@@ -84,7 +94,9 @@ class SessionThread(threading.Thread):
                 midi_path=self.midi_path,
                 manual=self.manual_mode,
                 bpm=self.manual_bpm,
-                serial_port=self.serial_port
+                serial_port=self.serial_port,
+                smoothing_window=self.smoothing_window,
+                stride=self.stride
             )
             
             # Run the logic from main.py
@@ -93,7 +105,8 @@ class SessionThread(threading.Thread):
                 args, 
                 status_callback=self.log_callback,
                 stop_event=self.stop_event,
-                session_dir_callback=self.session_dir_callback
+                session_dir_callback=self.session_dir_callback,
+                command_queue=self.command_queue 
             )
 
         except Exception as exc:
@@ -138,8 +151,8 @@ class GuiApp:
         style.configure("TFrame", background=self.P["bg"])
         style.configure("Card.TFrame", background=self.P["card_bg"], relief="flat")
         style.configure("H1.TLabel", font=("Segoe UI", 18, "bold"), foreground=self.P["text_main"], background=self.P["bg"])
-        style.configure("CardHeader.TLabel", font=("Segoe UI", 10, "bold"), foreground=self.P["text_sub"], background=self.P["card_bg"])
-        style.configure("Sub.TLabel", font=("Segoe UI", 10), foreground=self.P["text_sub"], background=self.P["bg"])
+        style.configure("CardHeader.TLabel", font=("Segoe UI", 12, "bold"), foreground=self.P["text_sub"], background=self.P["card_bg"])
+        style.configure("Sub.TLabel", font=("Segoe UI", 11), foreground=self.P["text_sub"], background=self.P["bg"])
         style.configure("CardLabel.TLabel", background=self.P["card_bg"], foreground=self.P["text_main"])
         style.configure("NavStatus.TLabel", background=self.P["bg"], foreground=self.P["accent"], font=("Segoe UI", 9, "italic"))
         style.configure("Primary.TButton", font=("Segoe UI", 10, "bold"), background=self.P["accent"], foreground="white", borderwidth=0, focuscolor=self.P["accent"], padding=(15, 10))
@@ -152,6 +165,14 @@ class GuiApp:
         style.configure("TEntry", fieldbackground=self.P["input_bg"], foreground=self.P["text_main"], padding=5, borderwidth=0)
         style.configure("TRadiobutton", background=self.P["card_bg"], foreground=self.P["text_main"], font=("Segoe UI", 10))
         style.map("TRadiobutton", indicatorcolor=[("selected", self.P["accent"])], background=[("active", self.P["card_bg"])])
+
+        # NEW: Compact Blue Button for "Set"
+        style.configure("CompactPrimary.TButton", font=("Segoe UI", 9, "bold"), background=self.P["accent"], foreground="white", borderwidth=0, padding=(8, 4))
+        style.map("CompactPrimary.TButton", background=[("active", self.P["accent_hover"])])
+        
+        # New: Help Button Style (Ghost)
+        style.configure("Help.TButton", font=("Segoe UI", 9, "bold"), background=self.P["card_bg"], foreground=self.P["accent"], borderwidth=0, padding=(2, 0))
+        style.map("Help.TButton", background=[("active", self.P["card_bg"])], foreground=[("active", "white")])
 
         base_dir = Path(__file__).resolve().parent.parent
         default_midi = base_dir / "midi_files" / "Technion_March1.mid"
@@ -210,8 +231,8 @@ class GuiApp:
         if SERIAL_AVAILABLE:
             self.port_combo = ttk.Combobox(port_row, textvariable=self.port_var)
             self.port_combo.pack(side="left", fill="x", expand=True, padx=(0, 5))
+            # No manual refresh needed anymore, but keeping button just in case
             ttk.Button(port_row, text="🔄", style="Compact.TButton", width=4, command=self.refresh_ports).pack(side="right")
-            self.refresh_ports() 
         else:
             # Fallback to text entry if pyserial not installed
             ttk.Entry(port_row, textvariable=self.port_var).pack(fill="x", expand=True)
@@ -238,23 +259,51 @@ class GuiApp:
                   relief="flat", padx=10, command=self.apply_manual_bpm)
         self.btn_set_bpm.pack(side="left")
 
-        # SMOOTHING CONTROL
-        ttk.Label(sidebar, text="Decay Speed (Smoothing)", style="CardHeader.TLabel").pack(anchor="w", pady=(15, 0))
+        # SMOOTHING CONTROL (Split into Acceleration & Deceleration)
+        ttk.Label(sidebar, text="Reaction Speed (Smoothing)", style="CardHeader.TLabel").pack(anchor="w", pady=(15, 0))
         
-        smoothing_row = ttk.Frame(sidebar, style="Card.TFrame")
-        smoothing_row.pack(fill="x", pady=5)
-        
-        self.smoothing_var = tk.StringVar(value="0.05")
-        self.smoothing_entry = ttk.Entry(smoothing_row, textvariable=self.smoothing_var, width=6)
-        self.smoothing_entry.pack(side="left", padx=(0, 5))
-        
-        tk.Button(smoothing_row, text="Set", font=("Segoe UI", 9, "bold"),
-                  bg=self.P["accent"], fg="white", activebackground=self.P["accent_hover"],
-                  relief="flat", padx=10, command=self.apply_smoothing).pack(side="left")
+        # 1. Acceleration (UP)
+        row_up = ttk.Frame(sidebar, style="Card.TFrame"); row_up.pack(fill="x", pady=5)
+        self.smooth_up_var = tk.StringVar(value="0.025")
+        ttk.Label(row_up, text="Attack (Up):", style="Sub.TLabel", width=12).pack(side="left")
+        ttk.Entry(row_up, textvariable=self.smooth_up_var, width=5).pack(side="left", padx=5)
+        tk.Button(row_up, text="Set", font=("Segoe UI", 8), bg=self.P["accent"], fg="white", 
+                  activebackground=self.P["accent_hover"], relief="flat", 
+                  command=lambda: self.apply_smoothing("up", self.smooth_up_var)).pack(side="left")
 
-        tk.Button(smoothing_row, text="?", font=("Segoe UI", 9, "bold"),
-                  bg=self.P["card_bg"], fg=self.P["accent"], activebackground=self.P["card_bg"],
-                  relief="flat", padx=5, command=self.show_smoothing_help).pack(side="left", padx=5)
+        # 2. Deceleration (DOWN)
+        row_down = ttk.Frame(sidebar, style="Card.TFrame"); row_down.pack(fill="x", pady=2)
+        self.smooth_down_var = tk.StringVar(value="0.025")
+        ttk.Label(row_down, text="Decay (Down):", style="Sub.TLabel", width=12).pack(side="left")
+        ttk.Entry(row_down, textvariable=self.smooth_down_var, width=5).pack(side="left", padx=5)
+        tk.Button(row_down, text="Set", font=("Segoe UI", 8), bg=self.P["accent"], fg="white", 
+                  activebackground=self.P["accent_hover"], relief="flat", 
+                  command=lambda: self.apply_smoothing("down", self.smooth_down_var)).pack(side="left")
+
+        ttk.Button(row_down, text="?", style="Help.TButton", width=2, command=self.show_smoothing_help).pack(side="left", padx=5)
+
+        # STEP AVERAGING WINDOW (ESP32 Config)
+        ttk.Label(sidebar, text="Step Averaging (Stability)", style="CardHeader.TLabel").pack(anchor="w", pady=(10, 0))
+        window_row = ttk.Frame(sidebar, style="Card.TFrame")
+        window_row.pack(fill="x", pady=5)
+        
+        self.step_window_var = tk.StringVar(value="10") # More stable default
+        ttk.Entry(window_row, textvariable=self.step_window_var, width=4, font=("Segoe UI", 12)).pack(side="left", padx=(0, 5))
+        ttk.Label(window_row, text="Steps", style="Sub.TLabel").pack(side="left", padx=(0, 5))
+        ttk.Button(window_row, text="Set", style="CompactPrimary.TButton", width=4, 
+                   command=lambda: self.apply_esp_config("window", self.step_window_var)).pack(side="left")
+        ttk.Button(window_row, text="?", style="Help.TButton", width=2, command=self.show_window_help).pack(side="left", padx=5)
+
+        # STRIDE CONFIG (New)
+        ttk.Label(sidebar, text="Update Frequency (Stride)", style="CardHeader.TLabel").pack(anchor="w", pady=(10, 0))
+        stride_row = ttk.Frame(sidebar, style="Card.TFrame")
+        stride_row.pack(fill="x", pady=5)
+        self.stride_var = tk.StringVar(value="1")
+        ttk.Entry(stride_row, textvariable=self.stride_var, width=4, font=("Segoe UI", 12)).pack(side="left", padx=(0, 5))
+        ttk.Label(stride_row, text="Steps", style="Sub.TLabel").pack(side="left", padx=(0, 5))
+        ttk.Button(stride_row, text="Set", style="CompactPrimary.TButton", width=4,
+                   command=lambda: self.apply_esp_config("stride", self.stride_var)).pack(side="left")
+        ttk.Button(stride_row, text="?", style="Help.TButton", width=2, command=self.show_stride_help).pack(side="left", padx=5)
         
         # --- BOTTOM CONTROLS ---
         ttk.Frame(sidebar, style="Card.TFrame").pack(fill="both", expand=True) # Spacer pushes everything down
@@ -292,7 +341,11 @@ class GuiApp:
         self.on_mode_change() # Init state
         self.poll_status()
         self.poll_session_dir()
+        self.poll_status()
+        self.poll_session_dir()
         self.poll_plot()
+        if SERIAL_AVAILABLE:
+            self.poll_ports() # NEW Auto-refresh
 
     def _draw_led(self, x, y, l, c):
         r=6; o=self.led_canvas.create_oval(x-r, y-r, x+r, y+r, fill=c, outline="")
@@ -354,8 +407,22 @@ class GuiApp:
         mm = self.mode_var.get() == "manual"
         mb = self._parse_bpm(self.manual_bpm_var.get()) if mm else None
         
+        try:
+            sw = int(self.step_window_var.get())
+            if sw < 1 or sw > 20: raise ValueError
+        except:
+            sw = 6 # Default fallback
+            self.step_window_var.set("6")
+
+        try:
+            st = int(self.stride_var.get())
+            if st < 1 or st > 20: raise ValueError
+        except:
+            st = 1
+            self.stride_var.set("1")
+
         # Create and start the background thread
-        self.session_thread = SessionThread(str(p), port, mm, mb, self.enqueue_status, self.enqueue_session_dir)
+        self.session_thread = SessionThread(str(p), port, mm, mb, sw, st, self.enqueue_status, self.enqueue_session_dir)
         self.session_thread.start()
         
         # Update UI state
@@ -386,22 +453,59 @@ class GuiApp:
             self.mode_var.set("manual"); self.log(f"Manual BPM: {b}")
         else: messagebox.showerror("Error", "Invalid BPM")
 
-    def apply_smoothing(self):
+    def apply_smoothing(self, direction, var):
         try:
-            val = float(self.smoothing_var.get())
+            val = float(var.get())
             if val < 0.001 or val > 1.0: raise ValueError
-            if self.session_thread: self.session_thread.update_smoothing_alpha(val)
-            self.log(f"Smoothing set to {val}")
+            
+            if self.session_thread:
+                if direction == "up":
+                    self.session_thread.update_smoothing_alpha_up(val)
+                else:
+                    self.session_thread.update_smoothing_alpha_down(val)
+            self.log(f"Smoothing {direction.upper()} set to {val}")
         except ValueError:
             messagebox.showerror("Error", "Invalid number. Use 0.001 - 1.0")
+            
+    def apply_esp_config(self, cfg_type: str, var: tk.StringVar):
+        """Sends new config to the running session thread."""
+        if not self.session_thread or not self.is_running:
+            self.log("Session not running - Setting saved for start")
+            return
+
+        try:
+            val = int(var.get())
+            if val < 1 or val > 20: raise ValueError
+            self.session_thread.update_esp_config(cfg_type, val)
+            self.log(f"Queued {cfg_type} update: {val}")
+        except ValueError:
+             messagebox.showerror("Error", "Invalid integer (1-20)")
 
     def show_smoothing_help(self):
-        msg = ("Controls how fast the music slows down when you stop walking.\n\n"
-               "0.01 = Very slow, cinematic decay.\n"
-               "0.20 = Fast, responsive decay.\n"
-               "1.00 = Instant (robotic).\n\n"
-               "Recommended: 0.05")
-        messagebox.showinfo("Smoothing Factor", msg)
+        msg = ("Controls reaction speed in each direction:\n\n"
+               "ATTACK (Up): How fast music SPEEDS UP when you run.\n"
+               " - High (0.1+) = Snappy\n"
+               " - Low (0.02) = Gradual\n\n"
+               "DECAY (Down): How fast music SLOWS DOWN when you stop.\n"
+               " - High = Quick stop\n"
+               " - Low = Cinematic fade out\n\n"
+               "Recommended: 0.025 for both")
+        messagebox.showinfo("Smoothing Factors", msg)
+        
+    def show_window_help(self):
+        msg = ("Controls how many steps are averaged to calculate your BPM.\n\n"
+               "Low (1-3): Very responsive, but jumpy.\n"
+               "High (10-20): Very stable, but reacts slowly.\n\n"
+               "Recommended: 3-6")
+        messagebox.showinfo("Step Averaging", msg)
+
+    def show_stride_help(self):
+        msg = ("Controls how often the music BPM is updated.\n\n"
+               "1 = Update every step (Smoothest).\n"
+               "2 = Update every 2 steps.\n"
+               "4 = Update every 4 steps (Less CPU load).\n\n"
+               "Recommended: 1")
+        messagebox.showinfo("Update Stride", msg)
 
     def quit_app(self):
         """Cleanly exit the application."""
@@ -429,10 +533,35 @@ class GuiApp:
         
     def poll_plot(self):
         """Updates the graph every 100ms."""
-        # TWEAK: Change '100' below to make the graph faster (e.g. 50) or slower (e.g. 500).
-        # Lower numbers = smoother but more CPU usage.
         if self.current_session_dir: self.refresh_plot()
-        self.root.after(100, self.poll_plot) # Ultra-fast refresh (100ms)
+        self.root.after(100, self.poll_plot)
+
+    def poll_ports(self):
+        """Checks for new serial ports every 2 seconds."""
+        if not SERIAL_AVAILABLE: return
+        try:
+            current_selection = self.port_var.get()
+            ports = serial.tools.list_ports.comports()
+            new_values = [f"{p.device} - {p.description}" for p in ports]
+            
+            # Update only if changed to avoid UI flicker
+            if list(self.port_combo['values']) != new_values:
+                self.port_combo['values'] = new_values
+                
+                if not new_values:
+                    self.port_combo.set("No devices found")
+                elif current_selection not in new_values:
+                    # Current selected device disappeared, or first run
+                    if "No devices" in current_selection or current_selection == "":
+                         self.port_combo.current(0)
+                    else:
+                        # Keep showing the old name (e.g. COM3) even if disconnected?
+                        # Or switch to first available? Let's switch to first available.
+                        self.port_combo.current(0)
+                        
+        except Exception: 
+            pass
+        self.root.after(2000, self.poll_ports)
 
     def refresh_plot(self):
         """Reads CSV and calls the plotter (visual logic is in plotter.py)."""
@@ -442,10 +571,22 @@ class GuiApp:
             # We use pandas to read the CSV quickly
             df = pd.read_csv(c)
             if df.empty or "time" not in df.columns: return
-            if 'seconds' not in df.columns: df["seconds"] = df.index
-            if "step_event" not in df.columns: df["step_event"] = False
-            else: df["step_event"] = df["step_event"].astype(str).str.lower().isin(["true", "1", "yes"])
-        except: return
+            
+            # FIX: Properly convert timestamp string to seconds (floats)
+            # using the helper from plotter.py
+            if "time" in df.columns:
+                 df["seconds"] = df["time"].apply(_elapsed_to_seconds)
+            else:
+                 df["seconds"] = df.index
+
+            # FIX: Robust Boolean Conversion for step_event
+            # Pandas sometimes reads "True" as boolean, sometimes as string depending on engine/version.
+            if "step_event" in df.columns:
+                 df["step_event"] = df["step_event"].astype(str).str.lower().isin(["true", "1", "yes"])
+            else:
+                 df["step_event"] = False
+        except Exception: 
+            return
         
         # Delegate to Plotter
         self.plotter.update(df)
