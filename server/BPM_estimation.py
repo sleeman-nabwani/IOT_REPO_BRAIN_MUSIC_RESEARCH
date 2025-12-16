@@ -10,7 +10,8 @@ class BPM_estimation:
         self.last_recorded_bpm = 0
         self.manual_mode = manual_mode
         self._pending_manual_bpm = manual_bpm
-        self.smoothing_alpha = 0.025 # Default smoothing
+        self.smoothing_alpha_up = 0.025   # Smoothing when speeding up (Attack)
+        self.smoothing_alpha_down = 0.025 # Smoothing when slowing down (Decay)
         self.step_count = 0 # Track number of steps for delayed start
         
         
@@ -23,9 +24,14 @@ class BPM_estimation:
         self.last_update_time = time.time()
 
     # Added this in order to change the smoothing factor at runtime:
-    def set_smoothing_alpha(self, alpha: float):
-        """Update the exponential smoothing factor (0.001 - 1.0)."""
-        self.smoothing_alpha = max(0.001, min(1.0, float(alpha)))
+    # Added this in order to change the smoothing factor at runtime:
+    def set_smoothing_alpha_up(self, alpha: float):
+        """Update the Attack smoothing factor (0.001 - 1.0)."""
+        self.smoothing_alpha_up = max(0.001, min(1.0, float(alpha)))
+
+    def set_smoothing_alpha_down(self, alpha: float):
+        """Update the Decay smoothing factor (0.001 - 1.0)."""
+        self.smoothing_alpha_down = max(0.001, min(1.0, float(alpha)))
 
     def set_manual_bpm(self, bpm: float | None):
         """Queue a manual BPM update to be applied on the next iteration."""
@@ -99,7 +105,27 @@ class BPM_estimation:
         if diff > 0.1:
             # Scale alpha by dt to make it frame-rate independent.
             # Base rate assumption: 50Hz (0.02s per frame).
-            speed_factor = self.smoothing_alpha * 25.0 
+            # Select Directional Smoothing Factor
+            if self.target_bpm > current_bpm:
+                # Acceleration (Attack)
+                alpha = self.smoothing_alpha_up
+                
+                # --- ADAPTIVE BOOST (User Request) ---
+                # If the target is FAR ahead (e.g. user started sprinting),
+                # we boost the alpha to catch up faster.
+                bpm_diff = self.target_bpm - current_bpm
+                if bpm_diff > 5.0:
+                    # Boost Factor: Increases linearly with distance
+                    # e.g., diff=15 -> boost=1+(15-5)*0.1 = 2.0x faster
+                    boost_factor = 1.0 + (bpm_diff - 5.0) * 0.1
+                    # Cap the boost to prevent snapping
+                    boost_factor = min(boost_factor, 4.0) 
+                    alpha *= boost_factor
+            else:
+                # Deceleration (Decay)
+                alpha = self.smoothing_alpha_down
+
+            speed_factor = alpha * 25.0 
             
             # Simple Linear Interpolation
             step = (self.target_bpm - current_bpm) * speed_factor * dt

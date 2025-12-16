@@ -44,6 +44,12 @@ def main(args, status_callback=print, stop_event=None, session_dir_callback=None
     
     # 1. Initialize Logger FIRST so we can log init steps
     logger = Logger(gui_callback=status_callback)
+    
+    # OUTPUT SESSION DIR FOR GUI PARSING
+    # The GUI listens for "SESSION_DIR:..." to know where to look for CSVs.
+    print(f"SESSION_DIR:{logger.path}")
+    sys.stdout.flush() # Ensure it sends immediately
+
     if session_dir_callback:
         session_dir_callback(logger.path)
 
@@ -91,6 +97,29 @@ def main(args, status_callback=print, stop_event=None, session_dir_callback=None
     playback = player.play()
     logger.log("Running main loop...")
     
+    # ------------------------------------------------------------------
+    # STDIN LISTENER (For Subprocess Mode)
+    # If no external queue is provided, we create one and listen to STDIN.
+    # ------------------------------------------------------------------
+    if command_queue is None:
+        import sys
+        from queue import SimpleQueue
+        import threading
+        
+        command_queue = SimpleQueue()
+        
+        def stdin_listener():
+            while True:
+                try:
+                    line = sys.stdin.readline()
+                    if not line: break
+                    line = line.strip()
+                    if line: command_queue.put(line)
+                except: break
+        
+        worker_thread = threading.Thread(target=stdin_listener, daemon=True)
+        worker_thread.start()
+    
     # ==================================================================================
     # MAIN LOOP
     # ==================================================================================
@@ -99,6 +128,49 @@ def main(args, status_callback=print, stop_event=None, session_dir_callback=None
         if stop_event and stop_event.is_set():
             logger.log("Session stopped by user.")
             break
+            
+        # PROCESS COMMAND QUEUE (From GUI Pipe or Thread)
+        while not command_queue.empty():
+            cmd = command_queue.get_nowait()
+            
+            # 1. Tuple Command (from Threading Mode)
+            if isinstance(cmd, tuple): 
+                # e.g. ("window", 10)
+                ctype, cval = cmd
+                if ctype == "window":
+                    send_config_command(ser, logger, "SET_WINDOW", cval, "steps window", "ACK,WINDOW")
+                elif ctype == "stride":
+                    send_config_command(ser, logger, "SET_STRIDE", cval, "update stride", "ACK,STRIDE")
+                    
+            # 2. String Command (from STDIN/Subprocess Mode)
+            elif isinstance(cmd, str):
+                # Format: "CMD:VALUE"
+                if ":" in cmd:
+                    parts = cmd.split(":")
+                    key = parts[0].upper()
+                    val = parts[1]
+                    
+                    try:
+                        if key == "SET_ALPHA_UP":
+                            bpm_estimation.set_smoothing_alpha_up(float(val))
+                            logger.log(f"Config: Alpha UP set to {val}")
+                        elif key == "SET_ALPHA_DOWN":
+                            bpm_estimation.set_smoothing_alpha_down(float(val))
+                            logger.log(f"Config: Alpha DOWN set to {val}")
+                        elif key == "SET_MANUAL_BPM":
+                            player.set_BPM(float(val))
+                            logger.log(f"Config: Manual BPM set to {val}")
+                        elif key == "SET_WINDOW":
+                            send_config_command(ser, logger, "SET_WINDOW", int(val), "steps window", "ACK,WINDOW")
+                        elif key == "SET_STRIDE":
+                             send_config_command(ser, logger, "SET_STRIDE", int(val), "update stride", "ACK,STRIDE")
+                    except ValueError:
+                        logger.log(f"Invalid command format: {cmd}")
+                
+                elif cmd == "QUIT":
+                    stop_event = threading.Event()
+                    stop_event.set()
+                    break
 
         try:
             next(playback)
@@ -153,6 +225,7 @@ def main(args, status_callback=print, stop_event=None, session_dir_callback=None
     logger.log("Session ended")
     player.close()
     if ser: ser.close()
+    print("EXIT_CLEAN") # Signal to GUI
     return player, logger, bpm_estimation
 
 if __name__ == "__main__":

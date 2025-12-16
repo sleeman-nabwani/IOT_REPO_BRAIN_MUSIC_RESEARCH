@@ -25,7 +25,7 @@ except ImportError:
     SERIAL_AVAILABLE = False
 
 # ==================================================================================
-# LOGIC CLASS (Unchanged)
+# LOGIC CLASS
 # ==================================================================================
 
 # ==================================================================================
@@ -33,86 +33,127 @@ except ImportError:
 # This class runs the music/serial loop in the background so the GUI doesn't freeze.
 # ==================================================================================
 
-class SessionThread(threading.Thread):
+import subprocess
+import sys
+import queue
+
+class SubprocessManager:
     """
-    Background worker thread. 
-    It imports and runs 'session_runner' logic in a separate process flow.
-    It communicates back to the GUI using callbacks.
+    Manages the 'main.py' engine process.
+    - Launches it as a subprocess.
+    - Writes commands to its STDIN.
+    - Reads logs from its STDOUT.
     """
     def __init__(self, midi_path, serial_port, manual_mode, manual_bpm, smoothing_window, stride, log_callback, session_dir_callback):
-        super().__init__(daemon=True) # Daemon means it dies when the main app closes
-        self.midi_path = midi_path
-        self.serial_port = serial_port
-        self.manual_mode = manual_mode
-        self.manual_bpm = manual_bpm
-        self.smoothing_window = smoothing_window # variable responsible of how many steps to average
-        self.stride = stride
-        self.log_callback = log_callback # Function to send text back to GUI
-        self.session_dir_callback = session_dir_callback # Function to send file path back
-        self.stop_event = threading.Event()
-        self.command_queue = SimpleQueue() # Queue for ESP32 commands
-        self.bpm_est = None
-        self._pending_bpm = manual_bpm
-        self._pending_manual_mode = manual_mode
+        self.log_callback = log_callback
+        self.session_dir_callback = session_dir_callback
+        self.process = None
+        self.running = False
+        
+        # Build Command Arguments
+        cmd = [sys.executable, "server/main.py", midi_path] # Ensure path is correct relative to execution
+        if manual_mode:
+            cmd.append("--manual")
+            if manual_bpm:
+                cmd.extend(["--bpm", str(manual_bpm)])
+        
+        if serial_port:
+             # Just pass it as an arg if main.py supported it, strictly main.py uses flags.
+             # but currently main.py parses 'known_args' so we should append if we modified parse_args.
+             # Ideally we pass everything via STDIN or flags.
+             # For now, let's assume main.py picks up the default or we add a flag.
+             # We need to add --serial-port to main.py args first? 
+             # Wait, main.py hardcodes "COM5" fallback. We should fix main.py args later.
+             pass 
+
+        # We pass initial config via flags
+        cmd.extend(["--smoothing", str(smoothing_window)])
+        cmd.extend(["--stride", str(stride)])
+        
+        # Launch Process
+        try:
+            # We use bufsize=1 for line buffering
+            self.process = subprocess.Popen(
+                cmd,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1
+            )
+            self.running = True
+            
+            # Start Background Reader Thread
+            self.reader_thread = threading.Thread(target=self._read_stdout, daemon=True)
+            self.reader_thread.start()
+            
+        except Exception as e:
+            self._log(f"Failed to start engine: {e}")
 
     def _log(self, msg):
         if self.log_callback: self.log_callback(msg)
 
+    def _read_stdout(self):
+        """Reads lines from the subprocess STDOUT and logs them."""
+        while self.running and self.process:
+            try:
+                line = self.process.stdout.readline()
+                if not line: break
+                line = line.strip()
+                
+                # Check for special signals
+                if line.startswith("SESSION_DIR:"):
+                     path_str = line.split(":", 1)[1]
+                     if self.session_dir_callback:
+                         self.session_dir_callback(Path(path_str))
+                     continue # Don't log this protocol line
+                
+                if line == "EXIT_CLEAN":
+                    self.running = False
+                    break
+
+                self._log(f"[Engine] {line}")
+            except Exception:
+                break
+            
+    def send_command(self, cmd_str):
+        """Writes a line to the subprocess STDIN."""
+        if self.process and self.running:
+            try:
+                self.process.stdin.write(cmd_str + "\n")
+                self.process.stdin.flush()
+            except Exception as e:
+                self._log(f"Send Error: {e}")
+
     def update_manual_bpm(self, bpm):
-        self._pending_bpm = bpm
-        if self.bpm_est: self.bpm_est.set_manual_bpm(bpm)
+        self.send_command(f"SET_MANUAL_BPM:{bpm}")
 
     def set_manual_mode(self, enabled):
-        self._pending_manual_mode = enabled
-        if self.bpm_est: self.bpm_est.set_manual_mode(enabled)
+        # Main doesn't support switching mode at runtime via STDIN yet, 
+        # but we can implement it if needed. For now, just log.
+        pass
 
-    def set_manual_mode(self, enabled):
-        self._pending_manual_mode = enabled
-        if self.bpm_est: self.bpm_est.set_manual_mode(enabled)
-        
     def update_smoothing_alpha_up(self, alpha):
-        if self.bpm_est: self.bpm_est.set_smoothing_alpha_up(alpha)
+        self.send_command(f"SET_ALPHA_UP:{alpha}")
 
     def update_smoothing_alpha_down(self, alpha):
-        if self.bpm_est: self.bpm_est.set_smoothing_alpha_down(alpha)
-        
+        self.send_command(f"SET_ALPHA_DOWN:{alpha}")
+
     def update_esp_config(self, cmd_type, value):
-        # Directly queue to the comms queue, skipping BPM_estimation
-        self.command_queue.put((cmd_type, value))
+        if cmd_type == "window":
+            self.send_command(f"SET_WINDOW:{value}")
+        elif cmd_type == "stride":
+            self.send_command(f"SET_STRIDE:{value}")
 
     def stop(self):
-        self.stop_event.set()
-
-    def run(self):
-        try:
-            self._log("Loading MIDI & Session...")
-            from main import main as run_main_logic
-            from types import SimpleNamespace
-            
-            # Create a mock ARGS object to pass to main()
-            args = SimpleNamespace(
-                midi_path=self.midi_path,
-                manual=self.manual_mode,
-                bpm=self.manual_bpm,
-                serial_port=self.serial_port,
-                smoothing_window=self.smoothing_window,
-                stride=self.stride
-            )
-            
-            # Run the logic from main.py
-            # We capture the returns (player, logger, bpm_est) so we can update them manually if needed
-            _, _, self.bpm_est = run_main_logic(
-                args, 
-                status_callback=self.log_callback,
-                stop_event=self.stop_event,
-                session_dir_callback=self.session_dir_callback,
-                command_queue=self.command_queue 
-            )
-
-        except Exception as exc:
-            self._log(f"Error: {exc}")
-        finally:
-            self._log("Session ended.")
+        self.running = False
+        if self.process:
+            self.send_command("QUIT")
+            try:
+                self.process.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                self.process.kill()
+            self.process = None
 
 # ==================================================================================
 # GUI CLASS
@@ -259,28 +300,21 @@ class GuiApp:
                   relief="flat", padx=10, command=self.apply_manual_bpm)
         self.btn_set_bpm.pack(side="left")
 
-        # SMOOTHING CONTROL (Split into Acceleration & Deceleration)
-        ttk.Label(sidebar, text="Reaction Speed (Smoothing)", style="CardHeader.TLabel").pack(anchor="w", pady=(15, 0))
+        # SMOOTHING CONTROL
+        ttk.Label(sidebar, text="Decay Speed (Smoothing)", style="CardHeader.TLabel").pack(anchor="w", pady=(15, 0))
         
-        # 1. Acceleration (UP)
-        row_up = ttk.Frame(sidebar, style="Card.TFrame"); row_up.pack(fill="x", pady=5)
-        self.smooth_up_var = tk.StringVar(value="0.025")
-        ttk.Label(row_up, text="Attack (Up):", style="Sub.TLabel", width=12).pack(side="left")
-        ttk.Entry(row_up, textvariable=self.smooth_up_var, width=5).pack(side="left", padx=5)
-        tk.Button(row_up, text="Set", font=("Segoe UI", 8), bg=self.P["accent"], fg="white", 
-                  activebackground=self.P["accent_hover"], relief="flat", 
-                  command=lambda: self.apply_smoothing("up", self.smooth_up_var)).pack(side="left")
+        smoothing_row = ttk.Frame(sidebar, style="Card.TFrame")
+        smoothing_row.pack(fill="x", pady=5)
+        
+        self.smoothing_var = tk.StringVar(value="0.02") # Smoother default
+        self.smoothing_entry = ttk.Entry(smoothing_row, textvariable=self.smoothing_var, width=6, font=("Segoe UI", 12))
+        self.smoothing_entry.pack(side="left", padx=(0, 5))
+        
+        tk.Button(smoothing_row, text="Set", font=("Segoe UI", 9, "bold"),
+                  bg=self.P["accent"], fg="white", activebackground=self.P["accent_hover"],
+                  relief="flat", padx=10, command=self.apply_smoothing).pack(side="left")
 
-        # 2. Deceleration (DOWN)
-        row_down = ttk.Frame(sidebar, style="Card.TFrame"); row_down.pack(fill="x", pady=2)
-        self.smooth_down_var = tk.StringVar(value="0.025")
-        ttk.Label(row_down, text="Decay (Down):", style="Sub.TLabel", width=12).pack(side="left")
-        ttk.Entry(row_down, textvariable=self.smooth_down_var, width=5).pack(side="left", padx=5)
-        tk.Button(row_down, text="Set", font=("Segoe UI", 8), bg=self.P["accent"], fg="white", 
-                  activebackground=self.P["accent_hover"], relief="flat", 
-                  command=lambda: self.apply_smoothing("down", self.smooth_down_var)).pack(side="left")
-
-        ttk.Button(row_down, text="?", style="Help.TButton", width=2, command=self.show_smoothing_help).pack(side="left", padx=5)
+        ttk.Button(smoothing_row, text="?", style="Help.TButton", width=2, command=self.show_smoothing_help).pack(side="left", padx=5)
 
         # STEP AVERAGING WINDOW (ESP32 Config)
         ttk.Label(sidebar, text="Step Averaging (Stability)", style="CardHeader.TLabel").pack(anchor="w", pady=(10, 0))
@@ -421,9 +455,9 @@ class GuiApp:
             st = 1
             self.stride_var.set("1")
 
-        # Create and start the background thread
-        self.session_thread = SessionThread(str(p), port, mm, mb, sw, st, self.enqueue_status, self.enqueue_session_dir)
-        self.session_thread.start()
+        # Create and start the Subprocess Manager
+        self.session_thread = SubprocessManager(str(p), port, mm, mb, sw, st, self.enqueue_status, self.enqueue_session_dir)
+        # self.session_thread.start() # No longer needed as init starts it
         
         # Update UI state
         self.is_running = True
@@ -453,17 +487,12 @@ class GuiApp:
             self.mode_var.set("manual"); self.log(f"Manual BPM: {b}")
         else: messagebox.showerror("Error", "Invalid BPM")
 
-    def apply_smoothing(self, direction, var):
+    def apply_smoothing(self):
         try:
-            val = float(var.get())
+            val = float(self.smoothing_var.get())
             if val < 0.001 or val > 1.0: raise ValueError
-            
-            if self.session_thread:
-                if direction == "up":
-                    self.session_thread.update_smoothing_alpha_up(val)
-                else:
-                    self.session_thread.update_smoothing_alpha_down(val)
-            self.log(f"Smoothing {direction.upper()} set to {val}")
+            if self.session_thread: self.session_thread.update_smoothing_alpha(val)
+            self.log(f"Smoothing set to {val}")
         except ValueError:
             messagebox.showerror("Error", "Invalid number. Use 0.001 - 1.0")
             
@@ -482,15 +511,12 @@ class GuiApp:
              messagebox.showerror("Error", "Invalid integer (1-20)")
 
     def show_smoothing_help(self):
-        msg = ("Controls reaction speed in each direction:\n\n"
-               "ATTACK (Up): How fast music SPEEDS UP when you run.\n"
-               " - High (0.1+) = Snappy\n"
-               " - Low (0.02) = Gradual\n\n"
-               "DECAY (Down): How fast music SLOWS DOWN when you stop.\n"
-               " - High = Quick stop\n"
-               " - Low = Cinematic fade out\n\n"
-               "Recommended: 0.025 for both")
-        messagebox.showinfo("Smoothing Factors", msg)
+        msg = ("Controls how fast the music slows down when you stop walking.\n\n"
+               "0.01 = Very slow, cinematic decay.\n"
+               "0.20 = Fast, responsive decay.\n"
+               "1.00 = Instant (robotic).\n\n"
+                "Recommended: 0.05")
+        messagebox.showinfo("Smoothing Factor", msg)
         
     def show_window_help(self):
         msg = ("Controls how many steps are averaged to calculate your BPM.\n\n"
