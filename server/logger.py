@@ -14,13 +14,18 @@ def _format_elapsed(seconds: float) -> str:
 class Logger:
     # NOTE: This logger is used both for the console and for the GUI.
     #       It is initialized with a GUI callback if available.
-    def __init__(self, gui_callback=None):
+    def __init__(self, gui_callback=None, session_name=None):
         self.start_time = time.time()
-        self.timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        self.gui_callback = gui_callback
-        
+        if session_name and session_name.strip():
+            # Sanitize name
+            safe_name = "".join([c for c in session_name if c.isalnum() or c in (' ', '_', '-')]).strip()
+            # New Structure: logs/NAME (Flattened - Overwrites/Updates existing folder)
+            self.path = Path(__file__).resolve().parent / "logs" / safe_name
+        else:
+            # Default Structure: logs/session_TIMESTAMP
+            self.path = Path(__file__).resolve().parent / "logs" / f"session_{self.timestamp}"
+
         #setting the path to the logs directory
-        self.path = Path(__file__).resolve().parent / "logs" / f"session_{self.timestamp}"
         self.path.mkdir(parents=True, exist_ok=True)
         
         self.file_path = self.path / "session_log.txt"

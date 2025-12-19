@@ -37,13 +37,19 @@ def parse_args() -> argparse.Namespace:
         default=1,
         help="Set the BPM update stride (update BPM every N steps)",
     )
+    parser.add_argument(
+        "--session-name",
+        type=str,
+        default=None,
+        help="Custom name for the session log directory",
+    )
     return parser.parse_args()
     
 def main(args, status_callback=print, stop_event=None, session_dir_callback=None, command_queue=None):
     midi_path = args.midi_path
     
     # 1. Initialize Logger FIRST so we can log init steps
-    logger = Logger(gui_callback=status_callback)
+    logger = Logger(gui_callback=status_callback, session_name=getattr(args, 'session_name', None))
     
     # OUTPUT SESSION DIR FOR GUI PARSING
     # The GUI listens for "SESSION_DIR:..." to know where to look for CSVs.
@@ -225,7 +231,7 @@ def main(args, status_callback=print, stop_event=None, session_dir_callback=None
     logger.log("Session ended")
     player.close()
     if ser: ser.close()
-    print("EXIT_CLEAN") # Signal to GUI
+    print("EXIT_CLEAN")
     return player, logger, bpm_estimation
 
 if __name__ == "__main__":

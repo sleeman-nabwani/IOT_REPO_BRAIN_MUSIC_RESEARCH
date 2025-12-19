@@ -44,7 +44,7 @@ class SubprocessManager:
     - Writes commands to its STDIN.
     - Reads logs from its STDOUT.
     """
-    def __init__(self, midi_path, serial_port, manual_mode, manual_bpm, smoothing_window, stride, log_callback, session_dir_callback):
+    def __init__(self, midi_path, serial_port, manual_mode, manual_bpm, smoothing_window, stride, log_callback, session_dir_callback, session_name=None):
         self.log_callback = log_callback
         self.session_dir_callback = session_dir_callback
         self.process = None
@@ -69,6 +69,9 @@ class SubprocessManager:
         # We pass initial config via flags
         cmd.extend(["--smoothing", str(smoothing_window)])
         cmd.extend(["--stride", str(stride)])
+        
+        if session_name:
+             cmd.extend(["--session-name", str(session_name)])
         
         # Launch Process
         try:
@@ -173,8 +176,8 @@ class GuiApp:
         # --- THEME CONFIGURATION ---
         # Defines the Slate/Dark color palette for a modern look.
         self.P = {
-            "bg": "#0f172a", "card_bg": "#1e293b", "input_bg": "#334155",
-            "text_main": "#f8fafc", "text_sub": "#94a3b8",
+            "bg": "#0f172a", "card_bg": "#1e293b", "input_bg": "#f1f5f9", # Light BG for inputs
+            "text_main": "#f8fafc", "text_sub": "#94a3b8", "text_input": "#0f172a", # Black/Dark text for inputs
             "accent": "#3b82f6", "accent_hover": "#2563eb",
             "danger": "#ef4444", "success": "#22c55e", "warning": "#eab308",
             "border": "#334155",
@@ -202,8 +205,12 @@ class GuiApp:
         style.map("Danger.TButton", background=[("active", "#b91c1c")])
         style.configure("Secondary.TButton", font=("Segoe UI", 10, "bold"), background=self.P["input_bg"], foreground=self.P["text_main"], borderwidth=0, padding=(15, 10))
         style.map("Secondary.TButton", background=[("active", "#475569")])
-        style.configure("Compact.TButton", background=self.P["input_bg"], foreground=self.P["text_main"], borderwidth=0, padding=(8, 4))
-        style.configure("TEntry", fieldbackground=self.P["input_bg"], foreground=self.P["text_main"], padding=5, borderwidth=0)
+        style.configure("Compact.TButton", background=self.P["input_bg"], foreground=self.P["text_input"], borderwidth=0, padding=(8, 4))
+        # INPUTS: Light BG, Dark Text
+        style.configure("TEntry", fieldbackground=self.P["input_bg"], foreground=self.P["text_input"], padding=5, borderwidth=0)
+        style.configure("TCombobox", fieldbackground=self.P["input_bg"], foreground=self.P["text_input"], background=self.P["input_bg"])
+        style.map("TCombobox", fieldbackground=[("readonly", self.P["input_bg"])], foreground=[("readonly", self.P["text_input"])])
+        
         style.configure("TRadiobutton", background=self.P["card_bg"], foreground=self.P["text_main"], font=("Segoe UI", 10))
         style.map("TRadiobutton", indicatorcolor=[("selected", self.P["accent"])], background=[("active", self.P["card_bg"])])
 
@@ -248,21 +255,70 @@ class GuiApp:
         main_body.columnconfigure(1, weight=1)
         main_body.rowconfigure(0, weight=1)
 
-        # SIdebar
-        sidebar = ttk.Frame(main_body, style="Card.TFrame", padding=20)
-        sidebar.grid(row=0, column=0, sticky="nsew", padx=(0, 20))
+        # SIdebar Container (Holds Canvas + Scrollbar)
+        sidebar_container = ttk.Frame(main_body, style="Card.TFrame")
+        sidebar_container.grid(row=0, column=0, sticky="nsew", padx=(0, 20))
+        
+        # Create Canvas & Scrollbar
+        self.canvas_sidebar = tk.Canvas(sidebar_container, bg=self.P["card_bg"], highlightthickness=0)
+        scrollbar = ttk.Scrollbar(sidebar_container, orient="vertical", command=self.canvas_sidebar.yview)
+        
+        # The actual Frame inside the canvas
+        sidebar = ttk.Frame(self.canvas_sidebar, style="Card.TFrame", padding=20)
+        
+        # Logic to make the frame inside the canvas scrollable
+        sidebar.bind(
+            "<Configure>",
+            lambda e: self.canvas_sidebar.configure(
+                scrollregion=self.canvas_sidebar.bbox("all")
+            )
+        )
+        
+        self.canvas_sidebar.create_window((0, 0), window=sidebar, anchor="nw", tags="inner_frame")
+        self.canvas_sidebar.configure(yscrollcommand=scrollbar.set)
+        
+        self.canvas_sidebar.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        
+        # Mousewheel Binding (Windows/Linux)
+        def _on_mousewheel(event):
+            self.canvas_sidebar.yview_scroll(int(-1*(event.delta/120)), "units")
+        
+        # Bind mousewheel only when hovering over sidebar
+        self.canvas_sidebar.bind_all("<MouseWheel>", _on_mousewheel)
+        
+        # Fix width of inner frame to match canvas
+        def _configure_canvas(event):
+            self.canvas_sidebar.itemconfig("inner_frame", width=event.width)
+        self.canvas_sidebar.bind("<Configure>", _configure_canvas)
         
         def section(title): ttk.Label(sidebar, text=title.upper(), style="CardHeader.TLabel").pack(anchor="w", pady=(15, 8))
 
-        section("Configuration")
+        # MIDI Track Selection
         ttk.Label(sidebar, text="MIDI Track", style="CardLabel.TLabel").pack(anchor="w")
-        self.midi_var = tk.StringVar(value=str(default_midi))
+        self.midi_var = tk.StringVar(value=str(default_midi.name)) # Just name for dropdown
         midi_row = ttk.Frame(sidebar, style="Card.TFrame")
         midi_row.pack(fill="x", pady=(5, 15))
-        ttk.Entry(midi_row, textvariable=self.midi_var).pack(side="left", fill="x", expand=True, padx=(0, 5))
+        
+        self.midi_combo = ttk.Combobox(midi_row, textvariable=self.midi_var)
+        self.midi_combo.pack(side="left", fill="x", expand=True, padx=(0, 5))
+        
+        # Folder button to open directory or pick file? 
+        # User wants dropdown, maybe keep "Open" button to pick custom?
+        # Let's keep one folder button to Pick Custom File.
         ttk.Button(midi_row, text="📂", style="Compact.TButton", width=3, command=self.choose_midi).pack(side="right")
-
-        # Serial Port Setup
+        
+        # SESSION NAME SELECTOR
+        ttk.Label(sidebar, text="Session Name (Log File)", style="CardLabel.TLabel").pack(anchor="w")
+        self.session_row = ttk.Frame(sidebar, style="Card.TFrame")
+        self.session_row.pack(fill="x", pady=(5, 10))
+        
+        self.session_name_var = tk.StringVar()
+        # Initial widget (will be updated by refresh)
+        self.session_input_widget = ttk.Combobox(self.session_row, textvariable=self.session_name_var)
+        self.session_input_widget.pack(side="left", fill="x", expand=True, padx=(0, 5))
+        
+        ttk.Button(self.session_row, text="🔄", style="Compact.TButton", width=4, command=self.refresh_session_list).pack(side="right") # Refresh list
         ttk.Label(sidebar, text="Serial Port", style="CardLabel.TLabel").pack(anchor="w")
         port_row = ttk.Frame(sidebar, style="Card.TFrame")
         port_row.pack(fill="x", pady=(5, 0))
@@ -300,21 +356,35 @@ class GuiApp:
                   relief="flat", padx=10, command=self.apply_manual_bpm)
         self.btn_set_bpm.pack(side="left")
 
-        # SMOOTHING CONTROL
-        ttk.Label(sidebar, text="Decay Speed (Smoothing)", style="CardHeader.TLabel").pack(anchor="w", pady=(15, 0))
+        # SMOOTHING CONTROL (Attack & Decay)
+        ttk.Label(sidebar, text="Attack Speed (Speeding Up)", style="CardHeader.TLabel").pack(anchor="w", pady=(15, 0))
         
-        smoothing_row = ttk.Frame(sidebar, style="Card.TFrame")
-        smoothing_row.pack(fill="x", pady=5)
+        attack_row = ttk.Frame(sidebar, style="Card.TFrame")
+        attack_row.pack(fill="x", pady=5)
         
-        self.smoothing_var = tk.StringVar(value="0.02") # Smoother default
-        self.smoothing_entry = ttk.Entry(smoothing_row, textvariable=self.smoothing_var, width=6, font=("Segoe UI", 12))
-        self.smoothing_entry.pack(side="left", padx=(0, 5))
+        self.smoothing_up_var = tk.StringVar(value="0.02") 
+        ttk.Entry(attack_row, textvariable=self.smoothing_up_var, width=6, font=("Segoe UI", 12)).pack(side="left", padx=(0, 5))
         
-        tk.Button(smoothing_row, text="Set", font=("Segoe UI", 9, "bold"),
+        tk.Button(attack_row, text="Set", font=("Segoe UI", 9, "bold"),
                   bg=self.P["accent"], fg="white", activebackground=self.P["accent_hover"],
-                  relief="flat", padx=10, command=self.apply_smoothing).pack(side="left")
+                  relief="flat", padx=10, command=self.apply_smoothing_up).pack(side="left")
 
-        ttk.Button(smoothing_row, text="?", style="Help.TButton", width=2, command=self.show_smoothing_help).pack(side="left", padx=5)
+        ttk.Button(attack_row, text="?", style="Help.TButton", width=2, command=self.show_attack_help).pack(side="left", padx=5)
+
+        # Decay
+        ttk.Label(sidebar, text="Decay Speed (Slowing Down)", style="CardHeader.TLabel").pack(anchor="w", pady=(15, 0))
+        
+        decay_row = ttk.Frame(sidebar, style="Card.TFrame")
+        decay_row.pack(fill="x", pady=5)
+        
+        self.smoothing_down_var = tk.StringVar(value="0.02")
+        ttk.Entry(decay_row, textvariable=self.smoothing_down_var, width=6, font=("Segoe UI", 12)).pack(side="left", padx=(0, 5))
+        
+        tk.Button(decay_row, text="Set", font=("Segoe UI", 9, "bold"),
+                  bg=self.P["accent"], fg="white", activebackground=self.P["accent_hover"],
+                  relief="flat", padx=10, command=self.apply_smoothing_down).pack(side="left")
+
+        ttk.Button(decay_row, text="?", style="Help.TButton", width=2, command=self.show_decay_help).pack(side="left", padx=5)
 
         # STEP AVERAGING WINDOW (ESP32 Config)
         ttk.Label(sidebar, text="Step Averaging (Stability)", style="CardHeader.TLabel").pack(anchor="w", pady=(10, 0))
@@ -378,8 +448,12 @@ class GuiApp:
         self.poll_status()
         self.poll_session_dir()
         self.poll_plot()
+        self.poll_plot()
         if SERIAL_AVAILABLE:
             self.poll_ports() # NEW Auto-refresh
+            
+        self.refresh_session_list() # Init session list
+        self.refresh_midi_list()    # Init MIDI list
 
     def _draw_led(self, x, y, l, c):
         r=6; o=self.led_canvas.create_oval(x-r, y-r, x+r, y+r, fill=c, outline="")
@@ -403,6 +477,80 @@ class GuiApp:
             self.port_combo.current(0)
         else:
             self.port_combo.set("No devices found")
+            
+    def get_midi_files(self):
+        """Scans midi_files/ directory."""
+        try:
+            base_dir = Path(__file__).resolve().parent.parent / "midi_files"
+            if not base_dir.exists(): return []
+            return [f.name for f in base_dir.glob("*.mid")]
+        except: return []
+
+    def refresh_midi_list(self):
+        vals = self.get_midi_files()
+        self.midi_combo['values'] = vals
+        if vals and not self.midi_var.get():
+             self.midi_combo.current(0)
+
+    def get_existing_sessions(self):
+        """
+        Scans logs/ for custom session names (folders).
+        Ignores default timestamped folders (start with 'session_').
+        """
+        try:
+            log_dir = Path(__file__).resolve().parent.parent / "logs"
+            if not log_dir.exists(): return []
+            
+            # Find folders that are NOT default sessions
+            # Default sessions look like "session_2025-..."
+            custom_names = []
+            for d in log_dir.iterdir():
+                if d.is_dir():
+                    # If it starts with 'session_', assume it's a timestamp folder
+                    # UNLESS the user explicitly named it "session_Something".
+                    # But per logger.py logic, named sessions are PARENT folders now.
+                    # So we just list all folders.
+                    # Wait, logger default creates "session_TIMESTAMP".
+                    # If user names it "Experiment", logger creates "Experiment/session_TIMESTAMP".
+                    # So we want to list "Experiment".
+                    # We should probably filter out the raw "session_20..." folders to avoid clutter?
+                    # Let's filter out folders that match the pattern "session_YYYY-MM-DD..." strictly?
+                    # For simplicity, let's just list everything that DOESN'T look like a default timestamp.
+                    if not d.name.startswith("session_2"): 
+                        custom_names.append(d.name)
+
+            custom_names.sort()
+            return custom_names
+        except Exception:
+            return []
+
+    def refresh_session_list(self):
+        vals = self.get_existing_sessions()
+        
+        # Determine strict type needed
+        # If no files -> Entry (cleaner). If files -> Combobox (dropdown).
+        target_type = ttk.Combobox if vals else ttk.Entry
+        
+        # Check current type
+        current_type = type(self.session_input_widget)
+        
+        if current_type != target_type:
+            # Swap Widget
+            self.session_input_widget.destroy()
+            if target_type == ttk.Combobox:
+                self.session_input_widget = ttk.Combobox(self.session_row, textvariable=self.session_name_var)
+                self.session_input_widget['values'] = vals
+            else:
+                self.session_input_widget = ttk.Entry(self.session_row, textvariable=self.session_name_var)
+            
+            # Repack (pack side=left puts it before the right-aligned button)
+            self.session_input_widget.pack(side="left", fill="x", expand=True, padx=(0, 5))
+            
+        elif vals and isinstance(self.session_input_widget, ttk.Combobox):
+             self.session_input_widget['values'] = vals
+
+        # Don't auto-select to preserve user input intent if they are typing
+
 
     def get_selected_port(self):
         """Extract just the COM port from the selection string 'COM3 - Arduino Uno'."""
@@ -429,8 +577,17 @@ class GuiApp:
     def start_session(self):
         """Action for the 'START SESSION' button."""
         if self.is_running: return
-        p = Path(self.midi_var.get())
-        if not p.exists(): messagebox.showerror("Error", "MIDI not found"); return
+        
+        # Resolve MIDI Path (Dropdown Name -> Full Path)
+        m_name = self.midi_var.get()
+        # Check if absolute path (from file picker) or relative (from dropdown)
+        if Path(m_name).exists():
+            p = Path(m_name)
+        else:
+            # Try finding it in midi_files
+            p = Path(__file__).resolve().parent.parent / "midi_files" / m_name
+            
+        if not p.exists(): messagebox.showerror("Error", f"MIDI not found: {m_name}"); return
         
         port = self.get_selected_port()
         if not port or "No devices" in port:
@@ -441,6 +598,10 @@ class GuiApp:
         mm = self.mode_var.get() == "manual"
         mb = self._parse_bpm(self.manual_bpm_var.get()) if mm else None
         
+        # Session Name
+        s_name = self.session_name_var.get().strip()
+        if not s_name: s_name = None # Let logger generate timestamp
+
         try:
             sw = int(self.step_window_var.get())
             if sw < 1 or sw > 20: raise ValueError
@@ -456,7 +617,7 @@ class GuiApp:
             self.stride_var.set("1")
 
         # Create and start the Subprocess Manager
-        self.session_thread = SubprocessManager(str(p), port, mm, mb, sw, st, self.enqueue_status, self.enqueue_session_dir)
+        self.session_thread = SubprocessManager(str(p), port, mm, mb, sw, st, self.enqueue_status, self.enqueue_session_dir, session_name=s_name)
         # self.session_thread.start() # No longer needed as init starts it
         
         # Update UI state
@@ -487,12 +648,21 @@ class GuiApp:
             self.mode_var.set("manual"); self.log(f"Manual BPM: {b}")
         else: messagebox.showerror("Error", "Invalid BPM")
 
-    def apply_smoothing(self):
+    def apply_smoothing_up(self):
         try:
-            val = float(self.smoothing_var.get())
+            val = float(self.smoothing_up_var.get())
             if val < 0.001 or val > 1.0: raise ValueError
-            if self.session_thread: self.session_thread.update_smoothing_alpha(val)
-            self.log(f"Smoothing set to {val}")
+            if self.session_thread: self.session_thread.update_smoothing_alpha_up(val)
+            self.log(f"Attack set to {val}")
+        except ValueError:
+            messagebox.showerror("Error", "Invalid number. Use 0.001 - 1.0")
+
+    def apply_smoothing_down(self):
+        try:
+            val = float(self.smoothing_down_var.get())
+            if val < 0.001 or val > 1.0: raise ValueError
+            if self.session_thread: self.session_thread.update_smoothing_alpha_down(val)
+            self.log(f"Decay set to {val}")
         except ValueError:
             messagebox.showerror("Error", "Invalid number. Use 0.001 - 1.0")
             
@@ -510,13 +680,19 @@ class GuiApp:
         except ValueError:
              messagebox.showerror("Error", "Invalid integer (1-20)")
 
-    def show_smoothing_help(self):
-        msg = ("Controls how fast the music slows down when you stop walking.\n\n"
-               "0.01 = Very slow, cinematic decay.\n"
-               "0.20 = Fast, responsive decay.\n"
-               "1.00 = Instant (robotic).\n\n"
-                "Recommended: 0.05")
-        messagebox.showinfo("Smoothing Factor", msg)
+    def show_attack_help(self):
+        msg = ("Controls how fast the music SPEEDS UP when you accelerate.\n\n"
+               "Low (0.02) = Gradual speed up.\n"
+               "High (0.20) = Snappy response.\n"
+               "Note: 'Sprint Boost' will override this if you run very fast.")
+        messagebox.showinfo("Attack Smoothing", msg)
+
+    def show_decay_help(self):
+        msg = ("Controls how fast the music SLOWS DOWN when you stop walking.\n\n"
+               "Low (0.01) = Very slow, cinematic decay.\n"
+               "High (0.20) = Fast, responsive decay.\n\n"
+                "Recommended: 0.02")
+        messagebox.showinfo("Decay Smoothing", msg)
         
     def show_window_help(self):
         msg = ("Controls how many steps are averaged to calculate your BPM.\n\n"
