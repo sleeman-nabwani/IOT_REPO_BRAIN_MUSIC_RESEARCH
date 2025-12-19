@@ -3,3 +3,5 @@ server/.idea/
 server/__pycache__/
 server/logs/
 .vscode/
+.venv/
+venv311/

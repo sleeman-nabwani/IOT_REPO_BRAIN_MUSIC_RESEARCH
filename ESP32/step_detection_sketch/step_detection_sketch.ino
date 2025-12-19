@@ -23,8 +23,8 @@ typedef struct {
 StepEvent stepEvent;
 
 //pressure threshold along with buffer for consistency:
-const int THRESHOLD = 700;
-const int pressureBuffer = 300;
+const int THRESHOLD = 900; // Lowered from 700 to catch lighter steps
+const int pressureBuffer = 200; // Lowered to ensure reset happens even with light contact
 
 uint32_t lastStepTime = 0;
 
@@ -64,14 +64,26 @@ void setup() {
   Serial.println("ready to send");
 }
 
+// --- FILTERING FUNCTION ---
+// Reads the pin multiple times and returns the average to remove noise.
+int readFiltered(int pin) {
+  long sum = 0;
+  const int SAMPLES = 20; // Take 20 readings fast
+  for (int i=0; i<SAMPLES; i++) {
+    sum += analogRead(pin);
+  }
+  return sum / SAMPLES;
+}
+
 void loop() {
   //getting the current time:
   uint32_t now =  millis();
   bool stepDetected = false;
   int stepFootId = 0;
-  //getting the fsr reading of the sensors:
-  int rightFsr = analogRead(RIGHT_PIN);
-  int leftFsr = analogRead(LEFT_PIN);
+  
+  //getting the FILTERED fsr reading of the sensors:
+  int rightFsr = readFiltered(RIGHT_PIN);
+  int leftFsr = readFiltered(LEFT_PIN);
   Serial.println("pressure:");
   Serial.println(rightFsr);
   //resetting the flags:

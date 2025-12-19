@@ -3,11 +3,14 @@
 #include <esp_now.h>
 
 // ==== SETTINGS ====
-const int SMOOTHING_WINDOW = 3;  // Steps to average for BPM
+int smoothingWindow = 3;  // Steps to average for BPM (changeable via serial)
+int updateStride = 1; // Update BPM every N steps (changeable via serial)
 const int TIMEOUT_MS = 10000;     // Reset BPM if no steps for 3 seconds
 bool sessionStarted = false;
 bool sessionStarting = true;
 uint32_t sessionStartTime = 0;
+int stepCounter = 0;
+float lastCalculatedBPM = 0.0;
 // ==== STRUCTS ====
 
 // 1. The Data Packet
@@ -149,7 +152,36 @@ void loop() {
       sessionStarting = false;
       sessionStarted = true;
       sessionStartTime = now;
+      stepCounter = 0;
+      lastCalculatedBPM = 0.0;
       Serial.println("ACK,START");
+    } else if (command.startsWith("SET_WINDOW,")) {
+      int commaIndex = command.indexOf(',');
+      if (commaIndex != -1) {
+        String valStr = command.substring(commaIndex + 1);
+        int val = valStr.toInt();
+        if (val > 0 && val <= 20) { 
+          smoothingWindow = val;
+          if (updateStride > smoothingWindow) updateStride = smoothingWindow;
+          // Trim immediately if needed
+          while (stepHistory.listSize > smoothingWindow) {
+             deleteLastNode();
+          }
+          Serial.print("ACK,WINDOW,");
+          Serial.println(smoothingWindow);
+        }
+      }
+    } else if (command.startsWith("SET_STRIDE,")) {
+      int commaIndex = command.indexOf(',');
+      if (commaIndex != -1) {
+        String valStr = command.substring(commaIndex + 1);
+        int val = valStr.toInt();
+        if (val > 0 && val <= smoothingWindow) {
+          updateStride = val;
+          Serial.print("ACK,STRIDE,");
+          Serial.println(updateStride);
+        }
+      }
     }
   }
   //if a step is received:
@@ -174,29 +206,36 @@ void loop() {
       foot = currentStep.footId;
       bpm = 0.0;
 
-      //Filter & List Management
-      if (interval > 2500)
-        clearList(); // Reset if stopped
-
       // Add new step to Linked List
       addNode(currentStep);
 
       // Trim List: If too big, delete the oldest node
-      if (stepHistory.listSize > SMOOTHING_WINDOW) {
+      if (stepHistory.listSize > smoothingWindow) {
         deleteLastNode();
       }
 
       // Calculate BPM using the List Function
-      bpm = calculateAverageBPM();
+      stepCounter++;
+      if (stepCounter % updateStride == 0) {
+        bpm = calculateAverageBPM();
+        lastCalculatedBPM = bpm;
+      } else {
+        bpm = lastCalculatedBPM;
+      }
     }
     
     //Send to PC
-    // Format: Timestamp, Foot, Interval, BPM
+    // Format: Timestamp, Foot, InstantBPM, AverageBPM
+    float instantBPM = 0.0;
+    if (interval > 0) {
+      instantBPM = 60000.0 / interval;
+    }
+
     Serial.print(now);
     Serial.print(", ");
     Serial.print(foot);
     Serial.print(", ");
-    Serial.print(interval);
+    Serial.print(instantBPM, 2);
     Serial.print(", ");
     Serial.println(bpm, 2);
 
