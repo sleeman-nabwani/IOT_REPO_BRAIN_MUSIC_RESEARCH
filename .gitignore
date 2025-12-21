@@ -6,8 +6,7 @@ server/utils/logs
 .vscode/
 .venv/
 venv311/
-utils/__pycache__
-utils/logs
-research/logs
+server/utils/__pycache__
 research/processed_data
 research/__pycache__
+research/results/plots

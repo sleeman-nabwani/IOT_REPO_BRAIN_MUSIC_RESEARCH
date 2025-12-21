@@ -12,11 +12,8 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 # --- Mock imports for context ---
 try:
 
-    from utils.BPM_estimation import BPM_estimation
     from utils.plotter import _elapsed_to_seconds, LivePlotter, generate_post_session_plot
     from utils.process_manager import SubprocessManager
-    from main import main as run_main_logic
-    import json
 except ImportError:
     pass
 

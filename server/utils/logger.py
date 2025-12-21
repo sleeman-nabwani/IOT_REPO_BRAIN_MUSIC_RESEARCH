@@ -5,9 +5,7 @@ import time
 import sys
 import json
 
-    
 def _format_elapsed(seconds: float) -> str:
-    # formats the time to look like stopper-style HH:MM:SS.mmm
     hours = int(seconds // 3600)
     minutes = int((seconds % 3600) // 60)
     secs = seconds % 60
