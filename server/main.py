@@ -1,11 +1,11 @@
 import sys
-from midi_player import MidiBeatSync
 import serial
 import argparse
 import threading
-from logger import Logger
-from BPM_estimation import BPM_estimation
-from comms import session_handshake, handle_engine_command, handle_step
+from utils.midi_player import MidiBeatSync
+from utils.logger import Logger
+from utils.BPM_estimation import BPM_estimation
+from utils.comms import session_handshake, handle_engine_command, handle_step
 
 #parse the arguments
 def parse_args() -> argparse.Namespace:
@@ -92,10 +92,6 @@ def main(args, status_callback=print, stop_event=None, session_dir_callback=None
             logger.log(f"Using default song BPM: {player.songBPM}")
     else:
         logger.log("Starting in DYNAMIC MODE")
-
-    logger.log("DEBUG: Attempting to start playback...")
-    playback = player.play()
-    logger.log("DEBUG: Playback started.")
     
     # 4. Initialize BPM Estimation
     bpm_estimation = BPM_estimation(player, logger, manual_mode=args.manual, manual_bpm=args.bpm)
@@ -123,8 +119,8 @@ def main(args, status_callback=print, stop_event=None, session_dir_callback=None
     # runtime serial reads should be non-blocking to avoid slowing playback
     ser.timeout = 0
     
-    # start playback after handshake
-    playback = player.play()
+    # start playback after handshake (threaded player handles timing)
+    player.start()
     logger.log("Running main loop...")
     
     # ------------------------------------------------------------------
@@ -166,20 +162,7 @@ def main(args, status_callback=print, stop_event=None, session_dir_callback=None
                 stop_event = threading.Event()
                 stop_event.set()
                 break
-
-        try:
-            next(playback)
-        except StopIteration:
-            logger.log("Song finished. Restarting...")
-            playback = player.play()
-            continue
-
-        # Check for manual updates from GUI
-        new_manual_bpm = bpm_estimation.check_manual_bpm_update()
-        if new_manual_bpm is not None:
-            player.set_BPM(new_manual_bpm)
-            logger.log(f"Manual BPM updated to {new_manual_bpm}")
-            
+          
         # ANIMATION: We must run update_bpm() every loop iteration.
         if not args.manual:
             bpm_estimation.update_bpm()
@@ -190,7 +173,7 @@ def main(args, status_callback=print, stop_event=None, session_dir_callback=None
             continue
         # handle the step
         try:
-            bpm, current_ts = handle_step(raw_line, player.walkingBPM)
+            bpm, instant_bpm, current_ts = handle_step(raw_line, player.walkingBPM)
         except ValueError:
             continue
         
@@ -200,6 +183,7 @@ def main(args, status_callback=print, stop_event=None, session_dir_callback=None
         logger.log(f"Processed: BPM={bpm}")
         
     logger.log("Session ended")
+    player.stop()
     player.close()
     if ser: ser.close()
     print("EXIT_CLEAN")
