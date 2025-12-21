@@ -2,6 +2,7 @@ import time
 import serial
 from logger import Logger
 
+# communication with the ESP32
 def send_config_command(ser: serial.Serial, logger: Logger, cmd_prefix: str,
                         value: int, desc: str, expected_ack_prefix: str,
                         retries: int = 3):
@@ -67,3 +68,51 @@ def session_handshake(ser: serial.Serial, logger: Logger, smoothing_window: int 
 
     logger.log("Session handshake completed")
     return True
+
+def handle_step(raw_line: str, walking_bpm: float):
+    step = raw_line.decode("utf-8", errors="ignore").strip()
+
+    ts_str, foot_str, interval_str, bpm_str = step.split(",")
+
+    ts = int(ts_str)
+    foot = int(foot_str)
+    interval = int(float(interval_str))
+    bpm = float(bpm_str)
+    #ignoring initial step
+    if interval == 0 and bpm == 0.0:
+        bpm = walking_bpm
+
+    current_ts = time.time()
+    return bpm, current_ts
+
+# communication with the GUI
+def handle_engine_command(cmd, ser, logger, bpm_estimation, player):
+    """
+    Process a command coming from the GUI/STDIN.
+    Returns True if a QUIT signal was handled (caller should break).
+    """
+    # String commands (from stdin)
+    if isinstance(cmd, str):
+        if ":" in cmd:
+            key, val = cmd.split(":", 1)
+            key = key.upper()
+            try:
+                if key == "SET_ALPHA_UP":
+                    bpm_estimation.set_smoothing_alpha_up(float(val))
+                    logger.log(f"Config: Alpha UP set to {val}")
+                elif key == "SET_ALPHA_DOWN":
+                    bpm_estimation.set_smoothing_alpha_down(float(val))
+                    logger.log(f"Config: Alpha DOWN set to {val}")
+                elif key == "SET_MANUAL_BPM":
+                    player.set_BPM(float(val))
+                    logger.log(f"Config: Manual BPM set to {val}")
+                elif key == "SET_WINDOW":
+                    send_config_command(ser, logger, "SET_WINDOW", int(val), "steps window", "ACK,WINDOW")
+                elif key == "SET_STRIDE":
+                    send_config_command(ser, logger, "SET_STRIDE", int(val), "update stride", "ACK,STRIDE")
+            except ValueError:
+                logger.log(f"Invalid command format: {cmd}")
+        elif cmd == "QUIT":
+            return True
+    return False
+

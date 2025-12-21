@@ -39,7 +39,7 @@ class BPM_estimation:
 
     def set_manual_mode(self, enabled: bool):
         """Switch between manual and dynamic modes at runtime."""
-        self.manual_mode = bool(enabled)
+        self.manual_mode = enabled
 
     def check_manual_bpm_update(self):
         # Return pending BPM if set, and clear it
@@ -148,8 +148,8 @@ class BPM_estimation:
             
             # Log significant changes (Reduced spam)
             if abs(new_bpm - current_bpm) > 1.0:
-                 self.logger.log(f"BPM sliding: {current_bpm:.2f} -> {new_bpm:.2f} (Target: {self.target_bpm:.2f})")
+                self.logger.log(f"BPM sliding: {current_bpm:.2f} -> {new_bpm:.2f} (Target: {self.target_bpm:.2f})")
             
             # Log for the graph and broadcast to GUI
-            self.logger.log_data(time.time(), new_bpm, self.target_bpm)
+            self.logger.log_data(time.time(), new_bpm, self.target_bpm, step_event = False)
 

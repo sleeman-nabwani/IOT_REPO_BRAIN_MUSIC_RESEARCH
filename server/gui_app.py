@@ -8,16 +8,9 @@ import datetime
 import pandas as pd
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from plotter import _elapsed_to_seconds, LivePlotter, generate_post_session_plot
+import json
 
-# --- Mock imports for context ---
-try:
-
-    from BPM_estimation import BPM_estimation
-    from plotter import _elapsed_to_seconds, LivePlotter, generate_post_session_plot
-    from main import main as run_main_logic
-    import json
-except ImportError:
-    pass
 
 try:
     import serial.tools.list_ports
