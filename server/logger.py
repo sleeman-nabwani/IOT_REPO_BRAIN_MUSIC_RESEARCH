@@ -2,10 +2,12 @@ from csv import writer
 from pathlib import Path
 import datetime
 import time
+import sys
+import json
 
-
+    
 def _format_elapsed(seconds: float) -> str:
-    #formats the time to look like stopper-style HH:MM:SS.mmm
+    # formats the time to look like stopper-style HH:MM:SS.mmm
     hours = int(seconds // 3600)
     minutes = int((seconds % 3600) // 60)
     secs = seconds % 60
@@ -16,14 +18,18 @@ class Logger:
     #       It is initialized with a GUI callback if available.
     def __init__(self, gui_callback=None, session_name=None):
         self.start_time = time.time()
+        self.timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        self.gui_callback = gui_callback
         if session_name and session_name.strip():
             # Sanitize name
             safe_name = "".join([c for c in session_name if c.isalnum() or c in (' ', '_', '-')]).strip()
-            # New Structure: logs/NAME (Flattened - Overwrites/Updates existing folder)
-            self.path = Path(__file__).resolve().parent / "logs" / safe_name
+            # New Structure: logs/NAME/session_TIMESTAMP (Patient History)
+            self.parent_dir = Path(__file__).resolve().parent / "logs" / safe_name
+            self.path = self.parent_dir / f"session_{self.timestamp}"
         else:
-            # Default Structure: logs/session_TIMESTAMP
-            self.path = Path(__file__).resolve().parent / "logs" / f"session_{self.timestamp}"
+            # New Default Structure: logs/Default/session_TIMESTAMP
+            self.parent_dir = Path(__file__).resolve().parent / "logs" / "Default"
+            self.path = self.parent_dir / f"session_{self.timestamp}"
 
         #setting the path to the logs directory
         self.path.mkdir(parents=True, exist_ok=True)
@@ -49,14 +55,27 @@ class Logger:
         with self.file_path.open("a", encoding="utf-8") as handle:
             handle.write(stamped + "\n")
         print(stamped)
+        sys.stdout.flush()
         
         # Update GUI if callback is provided
         if self.gui_callback:
             self.gui_callback(message)
             
-    def log_csv(
+    def log_data(
         self, timestamp: float, song_bpm: float, walking_bpm: float, step_event: bool = False):
         elapsed = self._elapsed_str(timestamp)
         with self.csv_path.open("a", newline="", encoding="utf-8") as handle:
             csv_writer = writer(handle)
             csv_writer.writerow([elapsed, song_bpm, walking_bpm, step_event])
+            
+        # DUAL STREAMING: Broadcast to GUI via RAM (Stdout)
+        # Format: DATA_PACKET:{"t": ..., "s": ..., "w": ..., "e": ...}
+        import json
+        packet = {
+            "t": elapsed, # time string
+            "s": song_bpm,
+            "w": walking_bpm,
+            "e": step_event
+        }
+        print(f"DATA_PACKET:{json.dumps(packet)}")
+        sys.stdout.flush()

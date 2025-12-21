@@ -14,8 +14,8 @@ def find_latest_session_folder():
     if not logs_dir.exists():
         raise FileNotFoundError("No 'logs' folder found.")
     
-    # get all subfolders: session_*
-    sessions = [p for p in logs_dir.iterdir() if p.is_dir()]
+    # get all subfolders recursively that start with "session_"
+    sessions = [p for p in logs_dir.rglob("session_*") if p.is_dir()]
     if not sessions:
         raise FileNotFoundError("No session folders found inside /logs.")
     
@@ -62,7 +62,11 @@ def save_static_plot(df, folder):
     Does NOT show the window (non-blocking).
     """
     df = df.copy()
-    df["seconds"] = df["time"].apply(_elapsed_to_seconds)
+    try:
+        df["seconds"] = df["time"].apply(_elapsed_to_seconds)
+        df["seconds"] = pd.to_numeric(df["seconds"], errors='coerce')
+    except Exception:
+        df["seconds"] = float("nan")
     if "step_event" in df.columns:
         df["step_event"] = (
             df["step_event"].astype(str).str.lower().isin(["true", "1", "yes"])
@@ -70,9 +74,18 @@ def save_static_plot(df, folder):
     else:
         df["step_event"] = True
 
+        df["step_event"] = True
+
+    # Drop invalid rows to prevent plotting errors
+    df.dropna(subset=["seconds", "walking_bpm", "song_bpm"], inplace=True)
+
     nan_value = float("nan")
     df["walking_plot"] = pd.to_numeric(df["walking_bpm"], errors='coerce')
     df["song_bpm"] = pd.to_numeric(df["song_bpm"], errors='coerce')
+    
+    if df.empty:
+        print("No valid data to plot.")
+        return
     
     # Calculate delta
     df["delta_step_only"] = (df["song_bpm"] - df["walking_plot"]).where(df["step_event"], nan_value)
@@ -184,10 +197,6 @@ def save_static_plot(df, folder):
     fig_path = folder / "BPM_plot.png"
     fig.savefig(fig_path, dpi=150, bbox_inches="tight")
     print(f"Plot saved to {fig_path}")
-
-    fig_path = folder / "BPM_plot.png"
-    fig.savefig(fig_path, dpi=150, bbox_inches="tight")
-    print(f"Plot saved to {fig_path}")
     
     # Clean up memory
     plt.close(fig)
@@ -200,29 +209,24 @@ def save_static_plot(df, folder):
 # ==================================================================================
 
 class LivePlotter:
-    def __init__(self, ax1, ax2, theme_colors):
+    def __init__(self, ax1, theme_colors):
         """
-        Initialize the plotter with the two axes (plots) and the color theme.
+        Initialize the plotter with the main axis and the color theme.
         ax1: Top plot (BPM)
-        ax2: Bottom plot (Delta/Sync)
         """
         self.ax1 = ax1
-        self.ax2 = ax2
+        # self.ax2 removed (Single plot mode)
         self.P = theme_colors
         
         # Persistent Line Objects
         # We store these so we can just update their data later instead of recreating them.
         self.line_walker = None
-        self.line_song = None
+        self.line_song = None 
         
-        # Delta Plot Objects (Line)
-        self.line_delta = None
-        self.fill_tolerance = None
         self.scat_steps = None
         
         # Apply the initial grid/labels/colors once at startup
-        self._style_axes(self.ax1, "LIVE BPM TRACE", "BPM", show_x=False)
-        self._style_axes(self.ax2, "SYNC DELTA (Dots = Steps)", "Delta (Song - Walking)", show_x=True)
+        self._style_axes(self.ax1, "LIVE BPM TRACE", "BPM", show_x=True)
 
     def _style_axes(self, ax, title, ylabel, show_x=False):
         """Applies the dark theme, grid lines, and removes borders for a clean look."""
@@ -268,7 +272,7 @@ class LivePlotter:
             # First run: Initialize the Line2D objects
             self.line_walker, = self.ax1.plot(t, w, color="#3b82f6", lw=2, label="Walker")
             self.line_song, = self.ax1.plot(t, s, color="#10b981", lw=2, ls="--", label="Music")
-            self.ax1.legend(facecolor=self.P["card_bg"], labelcolor="white", frameon=False, fontsize=8)
+            self.ax1.legend(facecolor=self.P["card_bg"], labelcolor="white", frameon=False, fontsize=8, loc="upper left")
         else:
             # Subsequent runs: Just update x and y data (Fast!)
             self.line_walker.set_data(t, w)
@@ -284,33 +288,6 @@ class LivePlotter:
         if df["step_event"].any(): 
             sub = df[df["step_event"]]
             self.scat_steps = self.ax1.scatter(sub["seconds"], sub["walking_bpm"], color="white", s=15, zorder=5)
-
-        # --- PLOT 2: DELTA (Bottom) ---
-        # Calculate Delta ONLY where step_event is True
-        # We need the full delta array for indexing, but we only plot points at step events
-        
-        # 1. Background Tolerance Band (+/- 2 BPM)
-        # We redraw this to fit the time axis
-        if self.fill_tolerance: self.fill_tolerance.remove()
-        self.fill_tolerance = self.ax2.fill_between(t, -2, 2, color="#f2f2f2", alpha=0.1, label="Tolerance (±2)")
-
-        # 2. Continuous Line Plot
-        delta = s - w
-        if self.line_delta is None:
-            self.line_delta, = self.ax2.plot(t, delta, color="#a855f7", lw=1.5, label="Sync Error") # Purple line
-        else:
-            self.line_delta.set_data(t, delta)
-
-        self.ax2.axhline(0, color=self.P["text_sub"], ls="--", lw=1, alpha=0.3)
-        self.ax2.relim()
-        self.ax2.autoscale_view()
-        
-        # Update Legend (Only if handlers exist)
-        # We do this every frame to ensure labels are correct if points appear/disappear
-        handles, labels = self.ax2.get_legend_handles_labels()
-        # Filter duplicates in legend
-        by_label = dict(zip(labels, handles))
-        self.ax2.legend(by_label.values(), by_label.keys(), facecolor=self.P["card_bg"], labelcolor="white", frameon=False, fontsize=8, loc="upper right")
 
 
 if __name__ == "__main__":

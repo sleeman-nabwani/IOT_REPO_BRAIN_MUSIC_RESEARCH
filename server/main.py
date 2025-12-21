@@ -1,7 +1,10 @@
+import sys
+import os
 from midi_player import MidiBeatSync
 import time
 import serial
 import argparse
+import threading
 from logger import Logger
 from BPM_estimation import BPM_estimation
 from comms import session_handshake
@@ -43,6 +46,12 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Custom name for the session log directory",
     )
+    parser.add_argument(
+        "--serial-port",
+        type=str,
+        default="COM5",
+        help="Serial port for the ESP32 (default: COM5)",
+    )
     return parser.parse_args()
     
 def main(args, status_callback=print, stop_event=None, session_dir_callback=None, command_queue=None):
@@ -55,12 +64,25 @@ def main(args, status_callback=print, stop_event=None, session_dir_callback=None
     # The GUI listens for "SESSION_DIR:..." to know where to look for CSVs.
     print(f"SESSION_DIR:{logger.path}")
     sys.stdout.flush() # Ensure it sends immediately
+    
+
 
     if session_dir_callback:
         session_dir_callback(logger.path)
 
     # 2. Initialize the midi player  
-    player = MidiBeatSync(midi_path)
+    # 2. Initialize the midi player  
+    logger.log("DEBUG: Attempting to initialize MidiBeatSync...")
+    
+    try:
+        player = MidiBeatSync(midi_path)
+        
+        logger.log("DEBUG: MidiBeatSync initialized successfully.")
+    except Exception as e:
+        logger.log(f"CRITICAL ERROR: Failed to initialize MIDI Player: {e}")
+        print(f"CRITICAL ERROR: {e}")
+        sys.stdout.flush()
+        return None, logger, None
     
     # 3. Log Mode
     if args.manual:
@@ -73,17 +95,21 @@ def main(args, status_callback=print, stop_event=None, session_dir_callback=None
     else:
         logger.log(f"Starting in DYNAMIC MODE")
 
+    logger.log("DEBUG: Attempting to start playback...")
     playback = player.play()
+    logger.log("DEBUG: Playback started.")
     
     # 4. Initialize BPM Estimation
     bpm_estimation = BPM_estimation(player, logger, manual_mode=args.manual, manual_bpm=args.bpm)
     logger.log("Session started")
     
     # 5. Open Serial Port
-    port = getattr(args, 'serial_port', "COM5")
+    port = args.serial_port
     ser = None
+    logger.log(f"DEBUG: Attempting to open serial port {port}...")
     try:
         ser = serial.Serial(port, 115200, timeout=0.2)
+        logger.log(f"DEBUG: Serial port {port} opened successfully.")
     except Exception as e:
         logger.log(f"Failed to open serial port {port}: {e}")
         return player, logger, bpm_estimation
@@ -108,9 +134,8 @@ def main(args, status_callback=print, stop_event=None, session_dir_callback=None
     # If no external queue is provided, we create one and listen to STDIN.
     # ------------------------------------------------------------------
     if command_queue is None:
-        import sys
+        # sys, SimpleQueue, threading already imported globally or available
         from queue import SimpleQueue
-        import threading
         
         command_queue = SimpleQueue()
         
@@ -222,7 +247,7 @@ def main(args, status_callback=print, stop_event=None, session_dir_callback=None
             # Register the step as a new TARGET for smoothing
             bpm_estimation.register_step(bpm)
             
-            logger.log_csv(current_ts, player.walkingBPM, bpm, step_event=True)
+            logger.log_data(current_ts, player.walkingBPM, bpm, step_event=True)
             logger.log(f"Processed: Interval={interval}, BPM={bpm}")
 
         except ValueError:

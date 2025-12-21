@@ -11,10 +11,11 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
 # --- Mock imports for context ---
 try:
-    from session_runner import create_session, run_session_loop
+
     from BPM_estimation import BPM_estimation
     from plotter import _elapsed_to_seconds, LivePlotter, generate_post_session_plot
     from main import main as run_main_logic
+    import json
 except ImportError:
     pass
 
@@ -44,27 +45,25 @@ class SubprocessManager:
     - Writes commands to its STDIN.
     - Reads logs from its STDOUT.
     """
-    def __init__(self, midi_path, serial_port, manual_mode, manual_bpm, smoothing_window, stride, log_callback, session_dir_callback, session_name=None):
+    def __init__(self, midi_path, serial_port, manual_mode, manual_bpm, smoothing_window, stride, log_callback, session_dir_callback, data_callback=None, session_name=None):
         self.log_callback = log_callback
         self.session_dir_callback = session_dir_callback
+        self.data_callback = data_callback
         self.process = None
         self.running = False
         
         # Build Command Arguments
-        cmd = [sys.executable, "server/main.py", midi_path] # Ensure path is correct relative to execution
+        # Use absolute path to ensure main.py is found regardless of CWD
+        import os
+        # Revert to sys.executable as it maps to the active VENV
+        cmd = [sys.executable, "main.py", midi_path]
         if manual_mode:
             cmd.append("--manual")
             if manual_bpm:
                 cmd.extend(["--bpm", str(manual_bpm)])
         
         if serial_port:
-             # Just pass it as an arg if main.py supported it, strictly main.py uses flags.
-             # but currently main.py parses 'known_args' so we should append if we modified parse_args.
-             # Ideally we pass everything via STDIN or flags.
-             # For now, let's assume main.py picks up the default or we add a flag.
-             # We need to add --serial-port to main.py args first? 
-             # Wait, main.py hardcodes "COM5" fallback. We should fix main.py args later.
-             pass 
+             cmd.extend(["--serial-port", str(serial_port)]) 
 
         # We pass initial config via flags
         cmd.extend(["--smoothing", str(smoothing_window)])
@@ -80,21 +79,41 @@ class SubprocessManager:
                 cmd,
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
+                stderr=subprocess.PIPE, # Capture separately
                 text=True,
-                bufsize=1
+                bufsize=1,
+                cwd=os.path.dirname(os.path.abspath(__file__)) # Execute INSIDE server/ folder
             )
             self.running = True
             
-            # Start Background Reader Thread
+            # Start Background Reader Threads
             self.reader_thread = threading.Thread(target=self._read_stdout, daemon=True)
             self.reader_thread.start()
+            
+            self.stderr_thread = threading.Thread(target=self._read_stderr, daemon=True)
+            self.stderr_thread.start()
             
         except Exception as e:
             self._log(f"Failed to start engine: {e}")
 
+        # Debug logging of command (disabled for clean production)
+        # self._log(f"Executing: {' '.join(cmd)}")
+
     def _log(self, msg):
+        # print(f"[GUI_DEBUG] {msg}") # Debug print disabled
         if self.log_callback: self.log_callback(msg)
+
+    def _read_stderr(self):
+        """Reads lines from the subprocess STDERR and logs them as errors."""
+        while self.running and self.process:
+            try:
+                line = self.process.stderr.readline()
+                if not line: break
+                line = line.strip()
+                if line:
+                    self._log(f"[Stderr] {line}")
+            except Exception:
+                break
 
     def _read_stdout(self):
         """Reads lines from the subprocess STDOUT and logs them."""
@@ -111,6 +130,16 @@ class SubprocessManager:
                          self.session_dir_callback(Path(path_str))
                      continue # Don't log this protocol line
                 
+                # Check for Data Packet (RAM Pipe)
+                if line.startswith("DATA_PACKET:"):
+                     if self.data_callback:
+                         try:
+                             json_str = line.split(":", 1)[1]
+                             data = json.loads(json_str)
+                             self.data_callback(data)
+                         except: pass
+                     continue
+
                 if line == "EXIT_CLEAN":
                     self.running = False
                     break
@@ -203,7 +232,8 @@ class GuiApp:
         style.map("Primary.TButton", background=[("active", self.P["accent_hover"])])
         style.configure("Danger.TButton", font=("Segoe UI", 10, "bold"), background=self.P["danger"], foreground="white", borderwidth=0, padding=(15, 10))
         style.map("Danger.TButton", background=[("active", "#b91c1c")])
-        style.configure("Secondary.TButton", font=("Segoe UI", 10, "bold"), background=self.P["input_bg"], foreground=self.P["text_main"], borderwidth=0, padding=(15, 10))
+        # CHANGED: Gray button for Quit (User Request)
+        style.configure("Secondary.TButton", font=("Segoe UI", 10, "bold"), background="#64748b", foreground="white", borderwidth=0, padding=(15, 10))
         style.map("Secondary.TButton", background=[("active", "#475569")])
         style.configure("Compact.TButton", background=self.P["input_bg"], foreground=self.P["text_input"], borderwidth=0, padding=(8, 4))
         # INPUTS: Light BG, Dark Text
@@ -228,8 +258,19 @@ class GuiApp:
         self.session_thread = None
         self.status_queue = SimpleQueue()
         self.session_dir_queue = SimpleQueue()
+        self.data_queue = SimpleQueue() # RAM Data Pipe
         self.current_session_dir = None
+        self.live_data_buffer = []      # Store data in RAM
         self.is_running = False
+        self.is_app_active = True
+        
+        # Poll jobs
+        self.job_status = None
+        self.job_dir = None
+        self.job_plot = None
+        self.job_ports = None
+
+
 
         # --- LAYOUT ---
         navbar = ttk.Frame(root, style="TFrame")
@@ -295,7 +336,7 @@ class GuiApp:
         def section(title): ttk.Label(sidebar, text=title.upper(), style="CardHeader.TLabel").pack(anchor="w", pady=(15, 8))
 
         # MIDI Track Selection
-        ttk.Label(sidebar, text="MIDI Track", style="CardLabel.TLabel").pack(anchor="w")
+        ttk.Label(sidebar, text="MIDI TRACK", style="CardHeader.TLabel").pack(anchor="w")
         self.midi_var = tk.StringVar(value=str(default_midi.name)) # Just name for dropdown
         midi_row = ttk.Frame(sidebar, style="Card.TFrame")
         midi_row.pack(fill="x", pady=(5, 15))
@@ -309,7 +350,7 @@ class GuiApp:
         ttk.Button(midi_row, text="📂", style="Compact.TButton", width=3, command=self.choose_midi).pack(side="right")
         
         # SESSION NAME SELECTOR
-        ttk.Label(sidebar, text="Session Name (Log File)", style="CardLabel.TLabel").pack(anchor="w")
+        ttk.Label(sidebar, text="SESSION NAME (LOG FILE)", style="CardHeader.TLabel").pack(anchor="w", pady=(10, 0))
         self.session_row = ttk.Frame(sidebar, style="Card.TFrame")
         self.session_row.pack(fill="x", pady=(5, 10))
         
@@ -319,7 +360,7 @@ class GuiApp:
         self.session_input_widget.pack(side="left", fill="x", expand=True, padx=(0, 5))
         
         ttk.Button(self.session_row, text="🔄", style="Compact.TButton", width=4, command=self.refresh_session_list).pack(side="right") # Refresh list
-        ttk.Label(sidebar, text="Serial Port", style="CardLabel.TLabel").pack(anchor="w")
+        ttk.Label(sidebar, text="SERIAL PORT", style="CardHeader.TLabel").pack(anchor="w", pady=(10, 0))
         port_row = ttk.Frame(sidebar, style="Card.TFrame")
         port_row.pack(fill="x", pady=(5, 0))
         
@@ -356,14 +397,16 @@ class GuiApp:
                   relief="flat", padx=10, command=self.apply_manual_bpm)
         self.btn_set_bpm.pack(side="left")
 
-        # SMOOTHING CONTROL (Attack & Decay)
-        ttk.Label(sidebar, text="Attack Speed (Speeding Up)", style="CardHeader.TLabel").pack(anchor="w", pady=(15, 0))
+        # SMOOTHING CONTROL (Climbing & Cascading)
+        ttk.Label(sidebar, text="CLIMBING (SPEEDING UP)", style="CardHeader.TLabel").pack(anchor="w", pady=(15, 0))
         
         attack_row = ttk.Frame(sidebar, style="Card.TFrame")
         attack_row.pack(fill="x", pady=5)
         
-        self.smoothing_up_var = tk.StringVar(value="0.02") 
-        ttk.Entry(attack_row, textvariable=self.smoothing_up_var, width=6, font=("Segoe UI", 12)).pack(side="left", padx=(0, 5))
+        self.smoothing_up_var = tk.StringVar() 
+        entry_up = ttk.Entry(attack_row, textvariable=self.smoothing_up_var, width=15, font=("Segoe UI", 12))
+        entry_up.pack(side="left", padx=(0, 5))
+        self._bind_placeholder(entry_up, self.smoothing_up_var, "Set Climbing")
         
         tk.Button(attack_row, text="Set", font=("Segoe UI", 9, "bold"),
                   bg=self.P["accent"], fg="white", activebackground=self.P["accent_hover"],
@@ -371,14 +414,16 @@ class GuiApp:
 
         ttk.Button(attack_row, text="?", style="Help.TButton", width=2, command=self.show_attack_help).pack(side="left", padx=5)
 
-        # Decay
-        ttk.Label(sidebar, text="Decay Speed (Slowing Down)", style="CardHeader.TLabel").pack(anchor="w", pady=(15, 0))
+        # Cascading
+        ttk.Label(sidebar, text="CASCADING (SLOWING DOWN)", style="CardHeader.TLabel").pack(anchor="w", pady=(15, 0))
         
         decay_row = ttk.Frame(sidebar, style="Card.TFrame")
         decay_row.pack(fill="x", pady=5)
         
-        self.smoothing_down_var = tk.StringVar(value="0.02")
-        ttk.Entry(decay_row, textvariable=self.smoothing_down_var, width=6, font=("Segoe UI", 12)).pack(side="left", padx=(0, 5))
+        self.smoothing_down_var = tk.StringVar()
+        entry_down = ttk.Entry(decay_row, textvariable=self.smoothing_down_var, width=15, font=("Segoe UI", 12))
+        entry_down.pack(side="left", padx=(0, 5))
+        self._bind_placeholder(entry_down, self.smoothing_down_var, "Set Cascading")
         
         tk.Button(decay_row, text="Set", font=("Segoe UI", 9, "bold"),
                   bg=self.P["accent"], fg="white", activebackground=self.P["accent_hover"],
@@ -387,23 +432,27 @@ class GuiApp:
         ttk.Button(decay_row, text="?", style="Help.TButton", width=2, command=self.show_decay_help).pack(side="left", padx=5)
 
         # STEP AVERAGING WINDOW (ESP32 Config)
-        ttk.Label(sidebar, text="Step Averaging (Stability)", style="CardHeader.TLabel").pack(anchor="w", pady=(10, 0))
+        ttk.Label(sidebar, text="Smoothing Window (Stability)", style="CardHeader.TLabel").pack(anchor="w", pady=(10, 0))
         window_row = ttk.Frame(sidebar, style="Card.TFrame")
         window_row.pack(fill="x", pady=5)
         
-        self.step_window_var = tk.StringVar(value="10") # More stable default
-        ttk.Entry(window_row, textvariable=self.step_window_var, width=4, font=("Segoe UI", 12)).pack(side="left", padx=(0, 5))
+        self.step_window_var = tk.StringVar()
+        entry_win = ttk.Entry(window_row, textvariable=self.step_window_var, width=15, font=("Segoe UI", 12))
+        entry_win.pack(side="left", padx=(0, 5))
+        self._bind_placeholder(entry_win, self.step_window_var, "Set Window")
         ttk.Label(window_row, text="Steps", style="Sub.TLabel").pack(side="left", padx=(0, 5))
         ttk.Button(window_row, text="Set", style="CompactPrimary.TButton", width=4, 
                    command=lambda: self.apply_esp_config("window", self.step_window_var)).pack(side="left")
         ttk.Button(window_row, text="?", style="Help.TButton", width=2, command=self.show_window_help).pack(side="left", padx=5)
 
         # STRIDE CONFIG (New)
-        ttk.Label(sidebar, text="Update Frequency (Stride)", style="CardHeader.TLabel").pack(anchor="w", pady=(10, 0))
+        ttk.Label(sidebar, text="Stride (Update Frequency)", style="CardHeader.TLabel").pack(anchor="w", pady=(10, 0))
         stride_row = ttk.Frame(sidebar, style="Card.TFrame")
         stride_row.pack(fill="x", pady=5)
-        self.stride_var = tk.StringVar(value="1")
-        ttk.Entry(stride_row, textvariable=self.stride_var, width=4, font=("Segoe UI", 12)).pack(side="left", padx=(0, 5))
+        self.stride_var = tk.StringVar()
+        entry_stride = ttk.Entry(stride_row, textvariable=self.stride_var, width=15, font=("Segoe UI", 12))
+        entry_stride.pack(side="left", padx=(0, 5))
+        self._bind_placeholder(entry_stride, self.stride_var, "Set Stride")
         ttk.Label(stride_row, text="Steps", style="Sub.TLabel").pack(side="left", padx=(0, 5))
         ttk.Button(stride_row, text="Set", style="CompactPrimary.TButton", width=4,
                    command=lambda: self.apply_esp_config("stride", self.stride_var)).pack(side="left")
@@ -430,12 +479,13 @@ class GuiApp:
         
         self.figure = Figure(figsize=(5, 4), dpi=100)
         self.figure.patch.set_facecolor(self.P["card_bg"])
-        self.ax1 = self.figure.add_subplot(211)
-        self.ax2 = self.figure.add_subplot(212, sharex=self.ax1)
-        self.figure.subplots_adjust(left=0.08, bottom=0.1, right=0.95, top=0.92, hspace=0.3)
+        # CHANGED: Single subplot (No bottom graph)
+        self.ax1 = self.figure.add_subplot(111)
+        self.ax2 = None # Explicitly None so Plotter knows
+        self.figure.subplots_adjust(left=0.08, bottom=0.1, right=0.95, top=0.92)
         
         # Initialize Plotter Logic
-        self.plotter = LivePlotter(self.ax1, self.ax2, self.P)
+        self.plotter = LivePlotter(self.ax1, self.P)
         # Initial style application (empty)
         self.plotter.update(pd.DataFrame({"seconds": [], "walking_bpm": [], "song_bpm": [], "step_event": []}))
 
@@ -603,21 +653,26 @@ class GuiApp:
         if not s_name: s_name = None # Let logger generate timestamp
 
         try:
-            sw = int(self.step_window_var.get())
+            raw_sw = self.step_window_var.get().strip()
+            sw = int(raw_sw) if raw_sw else 6 # Default 6 if empty
             if sw < 1 or sw > 20: raise ValueError
         except:
             sw = 6 # Default fallback
-            self.step_window_var.set("6")
+            self.step_window_var.set("")
 
         try:
-            st = int(self.stride_var.get())
+            raw_st = self.stride_var.get().strip()
+            st = int(raw_st) if raw_st else 1 # Default 1 if empty
             if st < 1 or st > 20: raise ValueError
         except:
             st = 1
-            self.stride_var.set("1")
+            self.stride_var.set("")
 
         # Create and start the Subprocess Manager
-        self.session_thread = SubprocessManager(str(p), port, mm, mb, sw, st, self.enqueue_status, self.enqueue_session_dir, session_name=s_name)
+        self.session_thread = SubprocessManager(str(p), port, mm, mb, sw, st, self.enqueue_status, self.enqueue_session_dir, self.enqueue_data, session_name=s_name)
+        
+        # Reset RAM Buffer
+        self.live_data_buffer = [] 
         # self.session_thread.start() # No longer needed as init starts it
         
         # Update UI state
@@ -650,49 +705,62 @@ class GuiApp:
 
     def apply_smoothing_up(self):
         try:
-            val = float(self.smoothing_up_var.get())
-            if val < 0.001 or val > 1.0: raise ValueError
-            if self.session_thread: self.session_thread.update_smoothing_alpha_up(val)
-            self.log(f"Attack set to {val}")
-        except ValueError:
-            messagebox.showerror("Error", "Invalid number. Use 0.001 - 1.0")
+            val = self.smoothing_up_var.get().strip()
+            # If default/empty, use 0.02
+            if not val or val == "Set Climbing": 
+                v = 0.02
+            else:
+                v = float(val)
+            if self.session_thread: self.session_thread.update_smoothing_alpha_up(v)
+            self.log(f"Climbing set to {v}")
+        except:
+            self.log("Invalid Climbing value")
 
     def apply_smoothing_down(self):
         try:
-            val = float(self.smoothing_down_var.get())
-            if val < 0.001 or val > 1.0: raise ValueError
-            if self.session_thread: self.session_thread.update_smoothing_alpha_down(val)
-            self.log(f"Decay set to {val}")
-        except ValueError:
-            messagebox.showerror("Error", "Invalid number. Use 0.001 - 1.0")
+            val = self.smoothing_down_var.get().strip()
+            # If default/empty, use 0.05
+            if not val or val == "Set Cascading":
+                v = 0.05
+            else:
+                v = float(val)
+            if self.session_thread: self.session_thread.update_smoothing_alpha_down(v)
+            self.log(f"Cascading set to {v}")
+        except:
+            self.log("Invalid Cascading value")
             
-    def apply_esp_config(self, cfg_type: str, var: tk.StringVar):
+    def apply_esp_config(self, type_key, var):
         """Sends new config to the running session thread."""
         if not self.session_thread or not self.is_running:
             self.log("Session not running - Setting saved for start")
             return
 
         try:
-            val = int(var.get())
-            if val < 1 or val > 20: raise ValueError
-            self.session_thread.update_esp_config(cfg_type, val)
-            self.log(f"Queued {cfg_type} update: {val}")
-        except ValueError:
-             messagebox.showerror("Error", "Invalid integer (1-20)")
+            val = var.get().strip()
+            # Fallback for empty or placeholder text
+            if not val or val.startswith("Set "):
+                 v = 10 if type_key == "window" else 1
+            else:
+                 v = int(val)
+                 
+            self.session_thread.update_esp_config(type_key, v)
+            self.log(f"{type_key.title()} set to {v}")
+        except:
+            self.log(f"Invalid {type_key} value")
 
     def show_attack_help(self):
         msg = ("Controls how fast the music SPEEDS UP when you accelerate.\n\n"
-               "Low (0.02) = Gradual speed up.\n"
+               "Low (0.02) = Gradual climbing.\n"
                "High (0.20) = Snappy response.\n"
                "Note: 'Sprint Boost' will override this if you run very fast.")
-        messagebox.showinfo("Attack Smoothing", msg)
+        messagebox.showinfo("Climbing Smoothing", msg)
 
     def show_decay_help(self):
         msg = ("Controls how fast the music SLOWS DOWN when you stop walking.\n\n"
-               "Low (0.01) = Very slow, cinematic decay.\n"
-               "High (0.20) = Fast, responsive decay.\n\n"
+               "Low (0.01) = Very slow, cinematic cascading.\n"
+               "High (0.20) = Fast, responsive drop.\n\n"
                 "Recommended: 0.02")
-        messagebox.showinfo("Decay Smoothing", msg)
+        messagebox.showinfo("Cascading Smoothing", msg)
         
     def show_window_help(self):
         msg = ("Controls how many steps are averaged to calculate your BPM.\n\n"
@@ -711,6 +779,14 @@ class GuiApp:
 
     def quit_app(self):
         """Cleanly exit the application."""
+        self.is_app_active = False
+        
+        # Cancel all pending poll tasks to avoid "invalid command name" errors
+        if self.job_status: self.root.after_cancel(self.job_status)
+        if self.job_dir: self.root.after_cancel(self.job_dir)
+        if self.job_plot: self.root.after_cancel(self.job_plot)
+        if self.job_ports: self.root.after_cancel(self.job_ports)
+
         if self.session_thread: self.session_thread.stop()
         self.root.quit()
         self.root.destroy()
@@ -720,23 +796,27 @@ class GuiApp:
     
     def enqueue_status(self, m): self.status_queue.put(m)
     def enqueue_session_dir(self, p): self.session_dir_queue.put(p)
+    def enqueue_data(self, d): self.data_queue.put(d)
     
     def poll_status(self):
         """Checks for new status messages every 200ms."""
+        if not self.is_app_active: return
         while not self.status_queue.empty(): self.log(self.status_queue.get_nowait())
-        self.root.after(200, self.poll_status)
+        self.job_status = self.root.after(200, self.poll_status)
         
     def poll_session_dir(self):
         """Checks if a new session folder was created."""
+        if not self.is_app_active: return
         while not self.session_dir_queue.empty():
             self.current_session_dir = self.session_dir_queue.get_nowait()
             self.log(f"Logging: {self.current_session_dir.name}")
-        self.root.after(500, self.poll_session_dir)
+        self.job_dir = self.root.after(500, self.poll_session_dir)
         
     def poll_plot(self):
         """Updates the graph every 100ms."""
+        if not self.is_app_active: return
         if self.current_session_dir: self.refresh_plot()
-        self.root.after(100, self.poll_plot)
+        self.job_plot = self.root.after(100, self.poll_plot)
 
     def poll_ports(self):
         """Checks for new serial ports every 2 seconds."""
@@ -763,30 +843,43 @@ class GuiApp:
                         
         except Exception: 
             pass
-        self.root.after(2000, self.poll_ports)
+        self.job_ports = self.root.after(2000, self.poll_ports)
 
     def refresh_plot(self):
-        """Reads CSV and calls the plotter (visual logic is in plotter.py)."""
-        c = self.current_session_dir / "session_data.csv"
-        if not c.exists(): return
-        try:
-            # We use pandas to read the CSV quickly
-            df = pd.read_csv(c)
-            if df.empty or "time" not in df.columns: return
+        """
+        Reads from RAM Buffer (Fast!) instead of Disk CSV.
+        """
+        # 1. Drain Queue into RAM Buffer
+        while not self.data_queue.empty():
+            self.live_data_buffer.append(self.data_queue.get_nowait())
             
-            # FIX: Properly convert timestamp string to seconds (floats)
-            # using the helper from plotter.py
+        # SAFETY: Prevent infinite RAM growth. Keep last 10,000 points (~5-10 mins of high activity)
+        # If user wants full history, they check the CSV/PNG after session.
+        if len(self.live_data_buffer) > 10000:
+            self.live_data_buffer = self.live_data_buffer[-10000:]
+            
+        if not self.live_data_buffer: return
+
+        # 2. Convert to DataFrame
+        try:
+            # We construct DataFrame from list of dicts (Very fast)
+            # Keys: t, s, w, e
+            df = pd.DataFrame(self.live_data_buffer)
+            
+            # Rename match plotter expectations
+            # Packet keys: t=time_str, s=song, w=walking, e=event
+            df.rename(columns={"t": "time", "s": "song_bpm", "w": "walking_bpm", "e": "step_event"}, inplace=True)
+            
             if "time" in df.columns:
                  df["seconds"] = df["time"].apply(_elapsed_to_seconds)
             else:
                  df["seconds"] = df.index
-
-            # FIX: Robust Boolean Conversion for step_event
-            # Pandas sometimes reads "True" as boolean, sometimes as string depending on engine/version.
+            
+            # Ensure boolean
             if "step_event" in df.columns:
-                 df["step_event"] = df["step_event"].astype(str).str.lower().isin(["true", "1", "yes"])
-            else:
-                 df["step_event"] = False
+                 # It comes as boolean from JSON, but just in case
+                 df["step_event"] = df["step_event"].astype(bool)
+
         except Exception: 
             return
         
@@ -798,6 +891,22 @@ class GuiApp:
     def _parse_bpm(v):
         try: return float(v) if float(v)>0 else None
         except: return None
+
+    def _bind_placeholder(self, entry, text_var, placeholder):
+        """Adds placeholder text to an entry."""
+        def on_focus_in(event):
+            if text_var.get() == placeholder:
+                text_var.set("")
+                entry.configure(foreground=self.P["text_input"])
+        def on_focus_out(event):
+            if not text_var.get():
+                text_var.set(placeholder)
+                entry.configure(foreground="#94a3b8")
+        if not text_var.get() or text_var.get() == placeholder:
+            text_var.set(placeholder)
+            entry.configure(foreground="#94a3b8")
+        entry.bind("<FocusIn>", on_focus_in)
+        entry.bind("<FocusOut>", on_focus_out)
 
 def main():
     root = tk.Tk()

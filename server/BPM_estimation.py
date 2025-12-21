@@ -150,6 +150,6 @@ class BPM_estimation:
             if abs(new_bpm - current_bpm) > 1.0:
                  self.logger.log(f"BPM sliding: {current_bpm:.2f} -> {new_bpm:.2f} (Target: {self.target_bpm:.2f})")
             
-            # Log for the graph
-            self.logger.log_csv(time.time(), new_bpm, self.target_bpm)
+            # Log for the graph and broadcast to GUI
+            self.logger.log_data(time.time(), new_bpm, self.target_bpm)
 
