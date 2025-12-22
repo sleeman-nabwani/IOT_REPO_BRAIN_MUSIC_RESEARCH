@@ -87,6 +87,12 @@ def save_static_plot(df, folder):
         print("No valid data to plot.")
         return
     
+    # Dynamic styling based on point count to keep lines/points readable
+    n_points = len(df)
+    lw_main = max(0.6, min(1.4, 500 / max(n_points, 1)))
+    marker_size_top = max(3, min(9, 4500 / max(n_points, 1)))
+    marker_size_bottom = max(3, min(9, 3500 / max(n_points, 1)))
+
     # Calculate delta
     df["delta_step_only"] = (df["song_bpm"] - df["walking_plot"]).where(df["step_event"], nan_value)
     df["abs_delta"] = df["delta_step_only"].abs()
@@ -118,19 +124,19 @@ def save_static_plot(df, folder):
 
     # Walker line restored for static plot (Connected Dots)
     axes[0].plot(
-        df["seconds"], df["walking_plot"], label="Walking BPM (sensor)", color="#1f77b4"
+        df["seconds"], df["walking_plot"], label="Walking BPM (sensor)", color="#1f77b4", lw=lw_main
     )
     axes[0].plot(
-        df["seconds"], df["song_bpm"], label="Song BPM (player)", color="#ff7f0e"
+        df["seconds"], df["song_bpm"], label="Song BPM (player)", color="#ff7f0e", lw=lw_main
     )
     if df["step_event"].any():
         axes[0].scatter(
             df.loc[df["step_event"], "seconds"],
             df.loc[df["step_event"], "walking_bpm"],
             label="Step events",
-            color="#ef4444",
-            s=30,
-            alpha=0.8,
+            color="#22c55e",
+            s=marker_size_top,
+            alpha=0.85,
             zorder=3,
             marker="o",
         )
@@ -163,7 +169,7 @@ def save_static_plot(df, folder):
             step_deltas[pos_mask],
             label="Song faster",
             color="#d62728",
-            s=22,
+            s=marker_size_bottom,
             alpha=0.75,
             edgecolors="white",
             linewidths=0.35,
@@ -175,7 +181,7 @@ def save_static_plot(df, folder):
             step_deltas[neg_mask],
             label="Song slower",
             color="#1f77b4",
-            s=22,
+            s=marker_size_bottom,
             alpha=0.75,
             edgecolors="white",
             linewidths=0.35,
@@ -199,9 +205,18 @@ def save_static_plot(df, folder):
     )
 
     fig.tight_layout(rect=(0, 0.05, 1, 1))
-    fig_path = folder / "BPM_plot.png"
-    fig.savefig(fig_path, dpi=150, bbox_inches="tight")
-    print(f"Plot saved to {fig_path}")
+    # Remove legacy PNG if it exists (live plot is display-only; static is PDF)
+    legacy_png = folder / "BPM_plot.png"
+    if legacy_png.exists():
+        try:
+            legacy_png.unlink()
+        except Exception:
+            pass
+
+    # Save high-definition PDF (preferred)
+    fig_path_pdf = folder / "BPM_plot.pdf"
+    fig.savefig(fig_path_pdf, bbox_inches="tight")
+    print(f"Plot saved to {fig_path_pdf}")
     
     # Clean up memory
     plt.close(fig)
@@ -294,6 +309,11 @@ class LivePlotter:
         
         # SMOOTHING: Use Linear Interpolation to connect dots
         w = w.interpolate(method='linear', limit_direction='both')
+
+        # Prevent a trailing line past the last actual step event
+        if step_events.any():
+            last_step_idx = step_events[step_events].index.max()
+            w.loc[w.index > last_step_idx] = float("nan")
         
         # --- PLOT 1: BPM (Top) ---
         if self.line_song is None:
@@ -302,10 +322,8 @@ class LivePlotter:
             self.line_song, = self.ax1.plot(t, s, color="#10b981", lw=2, ls="--", label="Music")
             self.ax1.legend(facecolor=self.P["card_bg"], labelcolor="white", frameon=False, fontsize=8, loc="upper left")
         else:
-            # Subsequent runs: Just update x and y data (Fast!)
-            # LIVE VIEW: Hide line, show dots only
-            self.line_walker.set_data([], []) 
-            self.line_song.set_data(t, s)
+            # Lines will be updated after scatter so points appear first
+            pass
             
         # X-axis: Only expand, never shrink (prevents resetting)
         # Track the maximum X value we've ever seen
@@ -342,10 +360,15 @@ class LivePlotter:
                 step_t = t[step_events]
                 step_w = w[step_events]
                 if len(step_t) > 0:
-                    # Enhanced visibility: Red dots, smaller size (30)
-                    self.scat_steps = self.ax1.scatter(step_t, step_w, color="#ef4444", s=30, zorder=5)
+                    # Accent dots (distinct from line color)
+                    self.scat_steps = self.ax1.scatter(step_t, step_w, color="#f59e0b", s=14, zorder=5)
         except Exception:
             pass  # Silently ignore scatter errors to prevent crashes
+
+        # Update lines after scatter so they render beneath dots in the same draw
+        if self.line_song is not None:
+            self.line_walker.set_data(t, w)
+            self.line_song.set_data(t, s)
 
     def finalize_plot(self, df):
         """
