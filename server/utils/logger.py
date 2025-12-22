@@ -22,11 +22,11 @@ class Logger:
             # Sanitize name
             safe_name = "".join([c for c in session_name if c.isalnum() or c in (' ', '_', '-')]).strip()
             # logs/NAME/session_TIMESTAMP (Patient History)
-            self.parent_dir = Path(__file__).resolve().parent / "logs" / safe_name
+            self.parent_dir = Path(__file__).resolve().parent.parent / "logs" / safe_name
             self.path = self.parent_dir / f"session_{self.timestamp}"
         else:
             # logs/Default/session_TIMESTAMP
-            self.parent_dir = Path(__file__).resolve().parent / "logs" / "Default"
+            self.parent_dir = Path(__file__).resolve().parent.parent / "logs" / "Default"
             self.path = self.parent_dir / f"session_{self.timestamp}"
 
         #setting the path to the logs directory
