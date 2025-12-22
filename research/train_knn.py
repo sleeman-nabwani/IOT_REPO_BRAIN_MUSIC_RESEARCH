@@ -131,7 +131,7 @@ def train_knn_model():
     # 7. Export Model
     import joblib
     model_path = MODELS_DIR / "knn_model.joblib"
-    joblib.dump(knn, model_path)
+    joblib.dump({"model": knn, "window": WINDOW_SIZE}, model_path)
     print(f"Model exported to '{model_path}'")
     print(f"\nExample: Input {X_test[0].tolist()} → Predicted {knn.predict([X_test[0]])[0]:.1f} BPM")
     
