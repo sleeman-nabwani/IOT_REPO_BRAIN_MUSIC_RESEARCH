@@ -3,7 +3,12 @@ server/.idea/
 server/__pycache__/
 server/utils/__pycache__/
 server/logs/
+server/utils/logs
 .vscode/
 .venv/
 venv311/
 .cursor/
+server/utils/__pycache__
+research/processed_data
+research/__pycache__
+research/results/plots

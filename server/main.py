@@ -1,3 +1,15 @@
+"""
+Brain-Music Sync - Main Engine
+
+This module orchestrates the real-time BPM synchronization loop:
+1. Connects to ESP32 sensor via serial
+2. Reads step data and calculates walking tempo
+3. Adjusts MIDI playback speed to match user's pace
+4. Logs session data for analysis
+
+Usage:
+    python main.py [midi_path] [--manual] [--bpm N] [--serial-port COMX]
+"""
 import sys
 import serial
 import argparse
@@ -132,17 +144,8 @@ def main(args, status_callback=print, stop_event=None, session_dir_callback=None
         
         command_queue = SimpleQueue()
         
-        def stdin_listener():
-            while True:
-                try:
-                    line = sys.stdin.readline()
-                    if not line: break
-                    line = line.strip()
-                    if line: command_queue.put(line)
-                except: break
-        
-        worker_thread = threading.Thread(target=stdin_listener, daemon=True)
-        worker_thread.start()
+        start_stdin_listener(command_queue)
+
     
     # ==================================================================================
     # MAIN LOOP
@@ -164,6 +167,7 @@ def main(args, status_callback=print, stop_event=None, session_dir_callback=None
                 break
           
         # ANIMATION: We must run update_bpm() every loop iteration.
+        # This now also handles any pending manual BPM updates internally.
         if not args.manual:
             bpm_estimation.update_bpm()
             
@@ -186,6 +190,10 @@ def main(args, status_callback=print, stop_event=None, session_dir_callback=None
     player.stop()
     player.close()
     if ser: ser.close()
+    
+    # Auto-retrain KNN model with new session data
+    retrain_knn_model()
+    
     print("EXIT_CLEAN")
     return player, logger, bpm_estimation
 
