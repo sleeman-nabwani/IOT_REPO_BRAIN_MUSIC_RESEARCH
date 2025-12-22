@@ -14,8 +14,8 @@ def find_latest_session_folder():
     if not logs_dir.exists():
         raise FileNotFoundError("No 'logs' folder found.")
     
-    # get all subfolders: session_*
-    sessions = [p for p in logs_dir.iterdir() if p.is_dir()]
+    # get all subfolders recursively that start with "session_"
+    sessions = [p for p in logs_dir.rglob("session_*") if p.is_dir()]
     if not sessions:
         raise FileNotFoundError("No session folders found inside /logs.")
     
@@ -62,7 +62,11 @@ def save_static_plot(df, folder):
     Does NOT show the window (non-blocking).
     """
     df = df.copy()
-    df["seconds"] = df["time"].apply(_elapsed_to_seconds)
+    try:
+        df["seconds"] = df["time"].apply(_elapsed_to_seconds)
+        df["seconds"] = pd.to_numeric(df["seconds"], errors='coerce')
+    except Exception:
+        df["seconds"] = float("nan")
     if "step_event" in df.columns:
         df["step_event"] = (
             df["step_event"].astype(str).str.lower().isin(["true", "1", "yes"])
@@ -70,10 +74,25 @@ def save_static_plot(df, folder):
     else:
         df["step_event"] = True
 
+        df["step_event"] = True
+
+    # Drop invalid rows to prevent plotting errors
+    df.dropna(subset=["seconds", "walking_bpm", "song_bpm"], inplace=True)
+
     nan_value = float("nan")
     df["walking_plot"] = pd.to_numeric(df["walking_bpm"], errors='coerce')
     df["song_bpm"] = pd.to_numeric(df["song_bpm"], errors='coerce')
     
+    if df.empty:
+        print("No valid data to plot.")
+        return
+    
+    # Dynamic styling based on point count to keep lines/points readable
+    n_points = len(df)
+    lw_main = max(0.6, min(1.4, 500 / max(n_points, 1)))
+    marker_size_top = max(3, min(9, 4500 / max(n_points, 1)))
+    marker_size_bottom = max(3, min(9, 3500 / max(n_points, 1)))
+
     # Calculate delta
     df["delta_step_only"] = (df["song_bpm"] - df["walking_plot"]).where(df["step_event"], nan_value)
     df["abs_delta"] = df["delta_step_only"].abs()
@@ -95,26 +114,31 @@ def save_static_plot(df, folder):
     )
     print(stats_msg.replace("\n", " | "))
 
+    # Process Walking BPM for the line (Smooth, Connect dots)
+    # 1. Mask non-steps (ignore decay)
+    w_smooth = df["walking_bpm"].where(df["step_event"], float("nan"))
+    # 2. Linear Interpolate to connect dots (limit_area='inside' prevents trailing line)
+    df["walking_plot"] = w_smooth.interpolate(method='linear', limit_area='inside')
+
     fig, axes = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
 
+    # Walker line restored for static plot (Connected Dots)
     axes[0].plot(
-        df["seconds"], df["walking_plot"], label="Walking BPM (sensor)", color="#1f77b4"
+        df["seconds"], df["walking_plot"], label="Walking BPM (sensor)", color="#1f77b4", lw=lw_main
     )
     axes[0].plot(
-        df["seconds"], df["song_bpm"], label="Song BPM (player)", color="#ff7f0e"
+        df["seconds"], df["song_bpm"], label="Song BPM (player)", color="#ff7f0e", lw=lw_main
     )
     if df["step_event"].any():
         axes[0].scatter(
             df.loc[df["step_event"], "seconds"],
             df.loc[df["step_event"], "walking_bpm"],
             label="Step events",
-            color="#2ca02c",
-            s=18,
-            alpha=0.6,
+            color="#22c55e",
+            s=marker_size_top,
+            alpha=0.85,
             zorder=3,
             marker="o",
-            edgecolors="white",
-            linewidths=0.3,
         )
     axes[0].set_ylabel("BPM")
     axes[0].set_title(f"BPM Tracking\n{folder.name}")
@@ -145,7 +169,7 @@ def save_static_plot(df, folder):
             step_deltas[pos_mask],
             label="Song faster",
             color="#d62728",
-            s=22,
+            s=marker_size_bottom,
             alpha=0.75,
             edgecolors="white",
             linewidths=0.35,
@@ -157,7 +181,7 @@ def save_static_plot(df, folder):
             step_deltas[neg_mask],
             label="Song slower",
             color="#1f77b4",
-            s=22,
+            s=marker_size_bottom,
             alpha=0.75,
             edgecolors="white",
             linewidths=0.35,
@@ -181,13 +205,18 @@ def save_static_plot(df, folder):
     )
 
     fig.tight_layout(rect=(0, 0.05, 1, 1))
-    fig_path = folder / "BPM_plot.png"
-    fig.savefig(fig_path, dpi=150, bbox_inches="tight")
-    print(f"Plot saved to {fig_path}")
+    # Remove legacy PNG if it exists (live plot is display-only; static is PDF)
+    legacy_png = folder / "BPM_plot.png"
+    if legacy_png.exists():
+        try:
+            legacy_png.unlink()
+        except Exception:
+            pass
 
-    fig_path = folder / "BPM_plot.png"
-    fig.savefig(fig_path, dpi=150, bbox_inches="tight")
-    print(f"Plot saved to {fig_path}")
+    # Save high-definition PDF (preferred)
+    fig_path_pdf = folder / "BPM_plot.pdf"
+    fig.savefig(fig_path_pdf, bbox_inches="tight")
+    print(f"Plot saved to {fig_path_pdf}")
     
     # Clean up memory
     plt.close(fig)
@@ -200,29 +229,31 @@ def save_static_plot(df, folder):
 # ==================================================================================
 
 class LivePlotter:
-    def __init__(self, ax1, ax2, theme_colors):
+    def __init__(self, ax1, theme_colors):
         """
-        Initialize the plotter with the two axes (plots) and the color theme.
+        Initialize the plotter with the main axis and the color theme.
         ax1: Top plot (BPM)
-        ax2: Bottom plot (Delta/Sync)
         """
         self.ax1 = ax1
-        self.ax2 = ax2
+        # self.ax2 removed (Single plot mode)
         self.P = theme_colors
         
         # Persistent Line Objects
         # We store these so we can just update their data later instead of recreating them.
-        self.line_walker = None
-        self.line_song = None
+        self.line_walker = None 
+        self.line_song = None 
         
-        # Delta Plot Objects (Line)
-        self.line_delta = None
-        self.fill_tolerance = None
         self.scat_steps = None
         
+        # Track maximum X value seen to prevent graph from shrinking/resetting
+        self.max_x_seen = 10  # Start with 10 seconds as minimum view
+        
         # Apply the initial grid/labels/colors once at startup
-        self._style_axes(self.ax1, "LIVE BPM TRACE", "BPM", show_x=False)
-        self._style_axes(self.ax2, "SYNC DELTA (Dots = Steps)", "Delta (Song - Walking)", show_x=True)
+        self._style_axes(self.ax1, "LIVE BPM TRACE", "BPM", show_x=True)
+        
+        # Set initial X-axis limit (Y will auto-scale)
+        self.ax1.set_xlim(0, self.max_x_seen)
+        self.ax1.set_ylim(0, 160) # Initial view
 
     def _style_axes(self, ax, title, ylabel, show_x=False):
         """Applies the dark theme, grid lines, and removes borders for a clean look."""
@@ -251,66 +282,111 @@ class LivePlotter:
         Receives a pandas DataFrame 'df' with the latest session data.
         Updates the graph lines efficiently.
         """
+        if df.empty:
+            return
+            
         # Ensure numeric types (handle "2400.00" strings or NaNs)
         t = pd.to_numeric(df["seconds"], errors='coerce')
         w = pd.to_numeric(df["walking_bpm"], errors='coerce')
         s = pd.to_numeric(df["song_bpm"], errors='coerce')
+        step_events = df["step_event"].copy() if "step_event" in df.columns else pd.Series([False] * len(df))
         
-        # Drop rows where critical data is NaN to prevent plotting errors
-        # (Optional: fillna(0) if preferred, but dropping is cleaner for graphs)
-        valid_mask = t.notna() & w.notna() & s.notna()
-        t = t[valid_mask]
-        w = w[valid_mask]
-        s = s[valid_mask]
+        # Drop rows where time or song_bpm is NaN
+        valid_mask = t.notna() & s.notna()
+        t = t[valid_mask].reset_index(drop=True)
+        w = w[valid_mask].reset_index(drop=True)
+        s = s[valid_mask].reset_index(drop=True)
+        step_events = step_events[valid_mask].reset_index(drop=True)
+        
+        if len(t) == 0:
+            return
+        
+        # Sample-and-Hold for Walking BPM (Blue Line)
+        # We only trust 'w' when a step actually occurred (step_event=True).
+        # Between steps, we persist the last known step value (Staircase).
+        # This ignores the 'decay' values sent by the estimator, preventing drops.
+        w = w.where(step_events, float("nan"))
+        
+        # SMOOTHING: Use Linear Interpolation to connect dots
+        w = w.interpolate(method='linear', limit_direction='both')
+
+        # Prevent a trailing line past the last actual step event
+        if step_events.any():
+            last_step_idx = step_events[step_events].index.max()
+            w.loc[w.index > last_step_idx] = float("nan")
         
         # --- PLOT 1: BPM (Top) ---
-        if self.line_walker is None:
+        if self.line_song is None:
             # First run: Initialize the Line2D objects
-            self.line_walker, = self.ax1.plot(t, w, color="#3b82f6", lw=2, label="Walker")
+            self.line_walker, = self.ax1.plot(t, w, color="#1f77b4", lw=2, label="Walker")
             self.line_song, = self.ax1.plot(t, s, color="#10b981", lw=2, ls="--", label="Music")
-            self.ax1.legend(facecolor=self.P["card_bg"], labelcolor="white", frameon=False, fontsize=8)
+            self.ax1.legend(facecolor=self.P["card_bg"], labelcolor="white", frameon=False, fontsize=8, loc="upper left")
         else:
-            # Subsequent runs: Just update x and y data (Fast!)
+            # Lines will be updated after scatter so points appear first
+            pass
+            
+        # X-axis: Only expand, never shrink (prevents resetting)
+        # Track the maximum X value we've ever seen
+        current_max = t.max() if len(t) > 0 else 0
+        if current_max > self.max_x_seen:
+            self.max_x_seen = current_max
+        
+        # Always set xlim from 0 to max + buffer
+        self.ax1.set_xlim(0, self.max_x_seen + 5)
+        
+        # Y-axis: Custom Auto-Scaling (0 to 160 minimum)
+        # We want to see 0-160 at least, but expand if BPM goes higher.
+        
+        # Get max values from data (handling NaNs safely)
+        max_s = s.max() if len(s) > 0 and not pd.isna(s.max()) else 0
+        max_w = w.max() if len(w) > 0 and not pd.isna(w.max()) else 0
+        current_max = max(max_s, max_w)
+        
+        # Determine new upper limit (at least 160, or data + padding)
+        new_ymax = max(160, current_max + 10)
+        
+        self.ax1.set_ylim(0, new_ymax)
+
+        # Scatter points (Footsteps) - with safety guards
+        try:
+            if self.scat_steps is not None:
+                self.scat_steps.remove()
+                self.scat_steps = None
+        except Exception:
+            self.scat_steps = None
+            
+        try:
+            if step_events.any():
+                step_t = t[step_events]
+                step_w = w[step_events]
+                if len(step_t) > 0:
+                    # Accent dots (distinct from line color)
+                    self.scat_steps = self.ax1.scatter(step_t, step_w, color="#f59e0b", s=14, zorder=5)
+        except Exception:
+            pass  # Silently ignore scatter errors to prevent crashes
+
+        # Update lines after scatter so they render beneath dots in the same draw
+        if self.line_song is not None:
             self.line_walker.set_data(t, w)
             self.line_song.set_data(t, s)
-            
-        # Re-calculate limits so the graph zooms out as time passes
-        self.ax1.relim()
-        self.ax1.autoscale_view()
 
-        # Scatter points (Footsteps)
-        # For scatter, it's easier to remove and redraw the collection than update it.
-        if self.scat_steps: self.scat_steps.remove()
-        if df["step_event"].any(): 
-            sub = df[df["step_event"]]
-            self.scat_steps = self.ax1.scatter(sub["seconds"], sub["walking_bpm"], color="white", s=15, zorder=5)
-
-        # --- PLOT 2: DELTA (Bottom) ---
-        # Calculate Delta ONLY where step_event is True
-        # We need the full delta array for indexing, but we only plot points at step events
+    def finalize_plot(self, df):
+        """
+        Called when session stops to draw the final connected line.
+        """
+        if df.empty or self.line_walker is None: return
         
-        # 1. Background Tolerance Band (+/- 2 BPM)
-        # We redraw this to fit the time axis
-        if self.fill_tolerance: self.fill_tolerance.remove()
-        self.fill_tolerance = self.ax2.fill_between(t, -2, 2, color="#f2f2f2", alpha=0.1, label="Tolerance (±2)")
-
-        # 2. Continuous Line Plot
-        delta = s - w
-        if self.line_delta is None:
-            self.line_delta, = self.ax2.plot(t, delta, color="#a855f7", lw=1.5, label="Sync Error") # Purple line
-        else:
-            self.line_delta.set_data(t, delta)
-
-        self.ax2.axhline(0, color=self.P["text_sub"], ls="--", lw=1, alpha=0.3)
-        self.ax2.relim()
-        self.ax2.autoscale_view()
+        # Ensure numeric
+        t = pd.to_numeric(df["seconds"], errors='coerce')
+        w = pd.to_numeric(df["walking_bpm"], errors='coerce')
+        step_events = df["step_event"].copy() if "step_event" in df.columns else pd.Series([False]*len(df))
         
-        # Update Legend (Only if handlers exist)
-        # We do this every frame to ensure labels are correct if points appear/disappear
-        handles, labels = self.ax2.get_legend_handles_labels()
-        # Filter duplicates in legend
-        by_label = dict(zip(labels, handles))
-        self.ax2.legend(by_label.values(), by_label.keys(), facecolor=self.P["card_bg"], labelcolor="white", frameon=False, fontsize=8, loc="upper right")
+        # Mask & Interpolate (Connect dots, NO trailing line)
+        w_smooth = w.where(step_events, float("nan"))
+        w_final = w_smooth.interpolate(method='linear', limit_area='inside')
+        
+        # Update line with full connected path
+        self.line_walker.set_data(t, w_final)
 
 
 if __name__ == "__main__":
