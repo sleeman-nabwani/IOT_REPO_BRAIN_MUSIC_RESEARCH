@@ -20,6 +20,7 @@ from utils.logger import Logger
 from utils.BPM_estimation import BPM_estimation
 from utils.comms import session_handshake, handle_engine_command, handle_step
 from utils.main_helper_functions import retrain_knn_model
+from utils.KNN_predictor import KNNPredictor
 # from utils.safety import safe_execute
 
 #parse the arguments
@@ -65,6 +66,11 @@ def parse_args() -> argparse.Namespace:
         type=str,
         default="COM5",
         help="Serial port for the ESP32 (default: COM5)",
+    )
+    parser.add_argument(
+        "--disable-knn",
+        action="store_true",
+        help="Disable KNN prediction for this run",
     )
     return parser.parse_args()
 
@@ -123,11 +129,19 @@ def main(args, status_callback=print, stop_event=None, session_dir_callback=None
     else:
         logger.log("Starting in DYNAMIC MODE")
     
-    # 4. Initialize BPM Estimation
-    bpm_estimation = BPM_estimation(player, logger, manual_mode=args.manual, manual_bpm=args.bpm)
+    # 4. Initialize KNN Predictor
+    if args.disable_knn:
+        knn_predictor = None
+        logger.log("KNN prediction disabled")
+    else:
+        knn_predictor = KNNPredictor()
+        logger.log("KNN prediction enabled")
+    
+    # 5. Initialize BPM Estimation
+    bpm_estimation = BPM_estimation(player, logger, manual_mode=args.manual, manual_bpm=args.bpm, knn_predictor=knn_predictor)
     logger.log("Session started")
     
-    # 5. Open Serial Port
+    # 6. Open Serial Port
     port = args.serial_port
     ser = None
     logger.log(f"DEBUG: Attempting to open serial port {port}...")

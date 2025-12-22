@@ -12,3 +12,4 @@ server/utils/__pycache__
 research/processed_data
 research/__pycache__
 research/results/plots
+research/results/models/

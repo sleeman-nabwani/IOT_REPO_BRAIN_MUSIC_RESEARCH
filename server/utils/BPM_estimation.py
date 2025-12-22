@@ -1,10 +1,11 @@
 import time
 from .midi_player import MidiBeatSync
 from .logger import Logger
-from .safety import safe_execute
+from .KNN_predictor import KNNPredictor
 
 class BPM_estimation:
-    def __init__(self, player: MidiBeatSync, logger: Logger, manual_mode: bool = False, manual_bpm: float = None) -> None:
+    def __init__(self, player: MidiBeatSync, logger: Logger, manual_mode: bool = False,
+                manual_bpm: float = None, knn_predictor: KNNPredictor = None) -> None:
         self.last_msg_time = time.time()
         self.player = player
         self.logger = logger
@@ -14,7 +15,7 @@ class BPM_estimation:
         self.smoothing_alpha_up = 0.025   # Smoothing when speeding up (Attack)
         self.smoothing_alpha_down = 0.025 # Smoothing when slowing down (Decay)
         self.step_count = 0 # Track number of steps for delayed start
-        
+        self.knn_predictor = knn_predictor
         
         # TARGET BPM: This is where we WANT to be.
         # The 'walkingBPM' is where we ARE currently.
@@ -61,6 +62,14 @@ class BPM_estimation:
         self.last_recorded_bpm = new_bpm
         self.last_msg_time = time.time() # Reset the decay timer
         self.step_count += 1
+        
+        #KNN Predictor:
+        if self.knn_predictor:
+            self.knn_predictor.add_step(new_bpm)
+            predicted_bpm = self.knn_predictor.predict_next()
+            print(f"Predicted BPM: {predicted_bpm}#####################################")
+            if predicted_bpm is not None:
+                self.target_bpm = predicted_bpm
 
 
     def update_recorded_values(self,last_msg_time: float, last_recorded_bpm: float):
@@ -81,16 +90,16 @@ class BPM_estimation:
         # WARMUP STRATEGY: Hold steady for first 2 steps.
         # Then (below), we use the Gradual Limiter to slide smoothy.
         if self.step_count == 1:
-             return
+            return
         
         # 3. Decay Logic (If user stops walking)
         interval = time.time() - self.last_msg_time
         if interval > 0:
             decay_limit = 60 / interval
             if decay_limit < self.target_bpm:
-                 # Only decay if valid steps have started
-                 if self.step_count > 0:
-                     self.target_bpm = decay_limit
+                # Only decay if valid steps have started
+                if self.step_count > 0:
+                    self.target_bpm = decay_limit
 
         # 4. Smoothing Logic (Target Seeking)
         # We slide the current music BPM towards the Target BPM.
