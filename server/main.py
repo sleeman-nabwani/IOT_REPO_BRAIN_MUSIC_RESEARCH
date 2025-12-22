@@ -1,11 +1,25 @@
-from midi_player import MidiBeatSync
-import time
+"""
+Brain-Music Sync - Main Engine
+
+This module orchestrates the real-time BPM synchronization loop:
+1. Connects to ESP32 sensor via serial
+2. Reads step data and calculates walking tempo
+3. Adjusts MIDI playback speed to match user's pace
+4. Logs session data for analysis
+
+Usage:
+    python main.py [midi_path] [--manual] [--bpm N] [--serial-port COMX]
+"""
+import sys
 import serial
 import argparse
-from logger import Logger
-from BPM_estimation import BPM_estimation
-from comms import session_handshake
+import threading
+from utils.midi_player import MidiBeatSync
+from utils.logger import Logger
+from utils.BPM_estimation import BPM_estimation
+from utils.comms import session_handshake, handle_engine_command, handle_step
 
+#parse the arguments
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Brain-music demo player")
     # TWEAK: Change the default MIDI file here if you want a different song by default.
@@ -37,41 +51,71 @@ def parse_args() -> argparse.Namespace:
         default=1,
         help="Set the BPM update stride (update BPM every N steps)",
     )
+    parser.add_argument(
+        "--session-name",
+        type=str,
+        default=None,
+        help="Custom name for the session log directory",
+    )
+    parser.add_argument(
+        "--serial-port",
+        type=str,
+        default="COM5",
+        help="Serial port for the ESP32 (default: COM5)",
+    )
     return parser.parse_args()
     
 def main(args, status_callback=print, stop_event=None, session_dir_callback=None, command_queue=None):
     midi_path = args.midi_path
     
-    # 1. Initialize Logger FIRST so we can log init steps
-    logger = Logger(gui_callback=status_callback)
+    # 1. Initialize Logger 
+    logger = Logger(gui_callback=status_callback, session_name=getattr(args, 'session_name', None))
+    
+    # OUTPUT SESSION DIR FOR GUI PARSING
+    # The GUI listens for "SESSION_DIR:..." to know where to save the plot.
+    print(f"SESSION_DIR:{logger.path}")
+    sys.stdout.flush() # Ensure it sends immediately
+    
+
+
     if session_dir_callback:
         session_dir_callback(logger.path)
-
+        
     # 2. Initialize the midi player  
-    player = MidiBeatSync(midi_path)
+    logger.log("DEBUG: Attempting to initialize MidiBeatSync...")
+    
+    try:
+        player = MidiBeatSync(midi_path)
+        
+        logger.log("DEBUG: MidiBeatSync initialized successfully.")
+    except Exception as e:
+        logger.log(f"CRITICAL ERROR: Failed to initialize MIDI Player: {e}")
+        print(f"CRITICAL ERROR: {e}")
+        sys.stdout.flush()
+        return None, logger, None
     
     # 3. Log Mode
     if args.manual:
-        logger.log(f"Starting in MANUAL MODE.")
+        logger.log("Starting in MANUAL MODE.")
         if args.bpm:
             logger.log(f"Setting fixed BPM to {args.bpm}")
             player.set_BPM(args.bpm)
         else:
-             logger.log(f"Using default song BPM: {player.songBPM}")
+            logger.log(f"Using default song BPM: {player.songBPM}")
     else:
-        logger.log(f"Starting in DYNAMIC MODE")
-
-    playback = player.play()
+        logger.log("Starting in DYNAMIC MODE")
     
     # 4. Initialize BPM Estimation
     bpm_estimation = BPM_estimation(player, logger, manual_mode=args.manual, manual_bpm=args.bpm)
     logger.log("Session started")
     
     # 5. Open Serial Port
-    port = getattr(args, 'serial_port', "COM5")
+    port = args.serial_port
     ser = None
+    logger.log(f"DEBUG: Attempting to open serial port {port}...")
     try:
         ser = serial.Serial(port, 115200, timeout=0.2)
+        logger.log(f"DEBUG: Serial port {port} opened successfully.")
     except Exception as e:
         logger.log(f"Failed to open serial port {port}: {e}")
         return player, logger, bpm_estimation
@@ -87,9 +131,21 @@ def main(args, status_callback=print, stop_event=None, session_dir_callback=None
     # runtime serial reads should be non-blocking to avoid slowing playback
     ser.timeout = 0
     
-    # Restart playback after handshake (optional reset)
-    playback = player.play()
+    # start playback after handshake (threaded player handles timing)
+    player.start()
     logger.log("Running main loop...")
+    
+    # ------------------------------------------------------------------
+    # STDIN LISTENER (For Subprocess Mode)
+    # If no external queue is provided, we create one and listen to STDIN.
+    # ------------------------------------------------------------------
+    if command_queue is None:
+        from queue import SimpleQueue
+        
+        command_queue = SimpleQueue()
+        
+        start_stdin_listener(command_queue)
+
     
     # ==================================================================================
     # MAIN LOOP
@@ -99,60 +155,46 @@ def main(args, status_callback=print, stop_event=None, session_dir_callback=None
         if stop_event and stop_event.is_set():
             logger.log("Session stopped by user.")
             break
-
-        try:
-            next(playback)
-        except StopIteration:
-            logger.log("Song finished. Restarting...")
-            playback = player.play()
-            continue
-
-        # Check for manual updates from GUI
-        new_manual_bpm = bpm_estimation.check_manual_bpm_update()
-        if new_manual_bpm is not None:
-             player.set_BPM(new_manual_bpm)
-             logger.log(f"Manual BPM updated to {new_manual_bpm}")
             
+        # PROCESS COMMAND QUEUE (From GUI Pipe or Thread)
+        while not command_queue.empty():
+            cmd = command_queue.get_nowait()
+            
+            quit =handle_engine_command(cmd, ser, logger, bpm_estimation, player)
+            if quit:
+                stop_event = threading.Event()
+                stop_event.set()
+                break
+          
         # ANIMATION: We must run update_bpm() every loop iteration.
+        # This now also handles any pending manual BPM updates internally.
         if not args.manual:
             bpm_estimation.update_bpm()
             
+        # read the step from the serial port
         raw_line = ser.readline()
         if not raw_line:
             continue
-        
-        step = raw_line.decode("utf-8", errors="ignore").strip()
-        logger.log(f"Step received: {step}")
+        # handle the step
         try:
-            ts_str, foot_str, interval_str, bpm_str = step.split(",")
-
-            ts = int(ts_str)
-            foot = int(foot_str)
-            interval = int(float(interval_str))
-            bpm = float(bpm_str)
-
-            # FILTER: Ignore startup/pause spikes
-            if interval > 3000:
-                logger.log(f"Ignoring long interval: {interval}ms")
-                continue
-
-            if interval == 0 and bpm == 0.0:
-                bpm = player.walkingBPM
-
-            # LOGGING: Record the "Dot" event (Raw Step) for the graph.
-            current_ts = time.time()
-            # Register the step as a new TARGET for smoothing
-            bpm_estimation.register_step(bpm)
-            
-            logger.log_csv(current_ts, player.walkingBPM, bpm, step_event=True)
-            logger.log(f"Processed: Interval={interval}, BPM={bpm}")
-
+            bpm, instant_bpm, current_ts = handle_step(raw_line, player.walkingBPM)
         except ValueError:
             continue
         
+        #register the step and log the data
+        bpm_estimation.register_step(bpm)    
+        logger.log_data(current_ts, player.walkingBPM, bpm, step_event=True)
+        logger.log(f"Processed: BPM={bpm}")
+        
     logger.log("Session ended")
+    player.stop()
     player.close()
     if ser: ser.close()
+    
+    # Auto-retrain KNN model with new session data
+    retrain_knn_model()
+    
+    print("EXIT_CLEAN")
     return player, logger, bpm_estimation
 
 if __name__ == "__main__":
