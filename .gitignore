@@ -1,7 +1,11 @@
 ESP32/SECRETS.h
 server/.idea/
 server/__pycache__/
+server/utils/__pycache__/
 server/logs/
 .vscode/
 .venv/
+research/results/plots/
+research/results/models/
+research/__pycache__/
 venv311/
