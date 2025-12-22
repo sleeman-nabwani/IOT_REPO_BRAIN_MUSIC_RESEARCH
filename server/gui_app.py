@@ -9,13 +9,14 @@ import pandas as pd
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
+
 # --- Mock imports for context ---
 try:
-
     from utils.plotter import _elapsed_to_seconds, LivePlotter, generate_post_session_plot
     from utils.process_manager import SubprocessManager
 except ImportError:
     pass
+
 
 try:
     import serial.tools.list_ports

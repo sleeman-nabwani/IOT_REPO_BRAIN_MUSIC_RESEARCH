@@ -11,17 +11,15 @@ Usage:
     python main.py [midi_path] [--manual] [--bpm N] [--serial-port COMX]
 """
 import sys
-import os
-from utils.midi_player import MidiBeatSync
-import time
 import serial
 import argparse
 import threading
+from utils.midi_player import MidiBeatSync
 from utils.logger import Logger
 from utils.BPM_estimation import BPM_estimation
-from utils.comms import session_handshake, send_config_command, process_input_commands, read_all_sensor_steps, start_stdin_listener
-from utils.main_helper_functions import retrain_knn_model
+from utils.comms import session_handshake, handle_engine_command, handle_step
 
+#parse the arguments
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Brain-music demo player")
     # TWEAK: Change the default MIDI file here if you want a different song by default.
@@ -70,11 +68,11 @@ def parse_args() -> argparse.Namespace:
 def main(args, status_callback=print, stop_event=None, session_dir_callback=None, command_queue=None):
     midi_path = args.midi_path
     
-    # 1. Initialize Logger FIRST so we can log init steps
+    # 1. Initialize Logger 
     logger = Logger(gui_callback=status_callback, session_name=getattr(args, 'session_name', None))
     
     # OUTPUT SESSION DIR FOR GUI PARSING
-    # The GUI listens for "SESSION_DIR:..." to know where to look for CSVs.
+    # The GUI listens for "SESSION_DIR:..." to know where to save the plot.
     print(f"SESSION_DIR:{logger.path}")
     sys.stdout.flush() # Ensure it sends immediately
     
@@ -82,8 +80,7 @@ def main(args, status_callback=print, stop_event=None, session_dir_callback=None
 
     if session_dir_callback:
         session_dir_callback(logger.path)
-
-    # 2. Initialize the midi player  
+        
     # 2. Initialize the midi player  
     logger.log("DEBUG: Attempting to initialize MidiBeatSync...")
     
@@ -99,18 +96,14 @@ def main(args, status_callback=print, stop_event=None, session_dir_callback=None
     
     # 3. Log Mode
     if args.manual:
-        logger.log(f"Starting in MANUAL MODE.")
+        logger.log("Starting in MANUAL MODE.")
         if args.bpm:
             logger.log(f"Setting fixed BPM to {args.bpm}")
             player.set_BPM(args.bpm)
         else:
-             logger.log(f"Using default song BPM: {player.songBPM}")
+            logger.log(f"Using default song BPM: {player.songBPM}")
     else:
-        logger.log(f"Starting in DYNAMIC MODE")
-
-    logger.log("DEBUG: Attempting to start playback...")
-    playback = player.play()
-    logger.log("DEBUG: Playback started.")
+        logger.log("Starting in DYNAMIC MODE")
     
     # 4. Initialize BPM Estimation
     bpm_estimation = BPM_estimation(player, logger, manual_mode=args.manual, manual_bpm=args.bpm)
@@ -138,8 +131,8 @@ def main(args, status_callback=print, stop_event=None, session_dir_callback=None
     # runtime serial reads should be non-blocking to avoid slowing playback
     ser.timeout = 0
     
-    # Restart playback after handshake (optional reset)
-    playback = player.play()
+    # start playback after handshake (threaded player handles timing)
+    player.start()
     logger.log("Running main loop...")
     
     # ------------------------------------------------------------------
@@ -147,7 +140,6 @@ def main(args, status_callback=print, stop_event=None, session_dir_callback=None
     # If no external queue is provided, we create one and listen to STDIN.
     # ------------------------------------------------------------------
     if command_queue is None:
-        # sys, SimpleQueue, threading already imported globally or available
         from queue import SimpleQueue
         
         command_queue = SimpleQueue()
@@ -164,42 +156,38 @@ def main(args, status_callback=print, stop_event=None, session_dir_callback=None
             logger.log("Session stopped by user.")
             break
             
-        # PROCESS COMMAND QUEUE (Helper Function)
-        process_input_commands(command_queue, ser, logger, bpm_estimation, player, stop_event)
-        if stop_event and stop_event.is_set():
-             break
-
-        try:
-            next(playback)
-        except StopIteration:
-            logger.log("Song finished. Restarting...")
-            playback = player.play()
-            continue
-
+        # PROCESS COMMAND QUEUE (From GUI Pipe or Thread)
+        while not command_queue.empty():
+            cmd = command_queue.get_nowait()
+            
+            quit =handle_engine_command(cmd, ser, logger, bpm_estimation, player)
+            if quit:
+                stop_event = threading.Event()
+                stop_event.set()
+                break
+          
         # ANIMATION: We must run update_bpm() every loop iteration.
         # This now also handles any pending manual BPM updates internally.
         if not args.manual:
             bpm_estimation.update_bpm()
             
-        # SENSOR READ: Drain the buffer to prevent lag/spikes
-        valid_step = read_all_sensor_steps(ser, logger)
-        if valid_step is None:
-             continue
-             
-        ts, foot, instant_bpm, avg_bpm = valid_step
-
-        if instant_bpm == 0 and avg_bpm == 0.0:
-            avg_bpm = player.walkingBPM
-
-        # LOGGING: Record the "Dot" event (Raw Step) for the graph.
-        current_ts = time.time()
-        # Register the step as a new TARGET for smoothing (use averaged BPM from ESP32)
-        bpm_estimation.register_step(avg_bpm)
+        # read the step from the serial port
+        raw_line = ser.readline()
+        if not raw_line:
+            continue
+        # handle the step
+        try:
+            bpm, instant_bpm, current_ts = handle_step(raw_line, player.walkingBPM)
+        except ValueError:
+            continue
         
-        logger.log_data(current_ts, player.walkingBPM, avg_bpm, step_event=True)
-        logger.log(f"Processed: Instant={instant_bpm:.1f}, Avg={avg_bpm:.1f}")
+        #register the step and log the data
+        bpm_estimation.register_step(bpm)    
+        logger.log_data(current_ts, player.walkingBPM, bpm, step_event=True)
+        logger.log(f"Processed: BPM={bpm}")
         
     logger.log("Session ended")
+    player.stop()
     player.close()
     if ser: ser.close()
     

@@ -50,7 +50,6 @@ class BPM_estimation:
             return bpm
         return None
 
-    @safe_execute
     def register_step(self, new_bpm):
         """
         Called when a NEW STEP is detected. 
@@ -68,24 +67,19 @@ class BPM_estimation:
         self.last_msg_time = last_msg_time
         self.last_recorded_bpm = last_recorded_bpm
 
-    @safe_execute
     def update_bpm(self):
         """
         Main Loop Function.
+        This runs ~100 times per second.
+        It moves the current BPM a tiny bit closer to the Target BPM every time.
         """
-        # 0. Check for manual updates from GUI (Command Queue)
-        manual = self.check_manual_bpm_update()
-        if manual is not None:
-             self.player.set_BPM(manual)
-             self.logger.log(f"Manual BPM updated to {manual}")
-        
-        # 1. Logic Gate: Manual Mode
-        if self.manual_mode: return  
+        # 1. Manual Mode Check
+        if self.manual_mode: return 
         
         # 2. Start Delay Check
-        # WARMUP STRATEGY: Hold steady for first 4 steps.
+        # WARMUP STRATEGY: Hold steady for first 2 steps.
         # Then (below), we use the Gradual Limiter to slide smoothy.
-        if self.step_count < 4:
+        if self.step_count == 1:
              return
         
         # 3. Decay Logic (If user stops walking)
