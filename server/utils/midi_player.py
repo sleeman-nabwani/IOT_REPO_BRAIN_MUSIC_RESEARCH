@@ -72,14 +72,14 @@ class MidiBeatSync :
                         remaining = target - now
                         if remaining <= 0:
                             break
-                        time.sleep(min(0.0001, remaining))
+                        time.sleep(min(0.005, remaining))
                         # updating the tempo factor mid-wait
                         with self._lock:
                             new_tf = self.TempoFactor
                         if new_tf != tf:
+                            remaining *= new_tf / tf
                             tf = new_tf
-                            # recompute remaining based on new tempo from "now"
-                            target = now + remaining / tf * new_tf
+                            target = now + remaining
                 if not msg.is_meta:
                     self.outport.send(msg)
             # restart song on finish
