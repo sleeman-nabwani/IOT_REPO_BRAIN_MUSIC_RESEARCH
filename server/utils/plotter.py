@@ -108,8 +108,15 @@ def save_static_plot(df, folder):
     )
     print(stats_msg.replace("\n", " | "))
 
+    # Process Walking BPM for the line (Smooth, Connect dots)
+    # 1. Mask non-steps (ignore decay)
+    w_smooth = df["walking_bpm"].where(df["step_event"], float("nan"))
+    # 2. Linear Interpolate to connect dots (limit_area='inside' prevents trailing line)
+    df["walking_plot"] = w_smooth.interpolate(method='linear', limit_area='inside')
+
     fig, axes = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
 
+    # Walker line restored for static plot (Connected Dots)
     axes[0].plot(
         df["seconds"], df["walking_plot"], label="Walking BPM (sensor)", color="#1f77b4"
     )
@@ -121,13 +128,11 @@ def save_static_plot(df, folder):
             df.loc[df["step_event"], "seconds"],
             df.loc[df["step_event"], "walking_bpm"],
             label="Step events",
-            color="#2ca02c",
-            s=18,
-            alpha=0.6,
+            color="#ef4444",
+            s=30,
+            alpha=0.8,
             zorder=3,
             marker="o",
-            edgecolors="white",
-            linewidths=0.3,
         )
     axes[0].set_ylabel("BPM")
     axes[0].set_title(f"BPM Tracking\n{folder.name}")
@@ -220,13 +225,20 @@ class LivePlotter:
         
         # Persistent Line Objects
         # We store these so we can just update their data later instead of recreating them.
-        self.line_walker = None
+        self.line_walker = None 
         self.line_song = None 
         
         self.scat_steps = None
         
+        # Track maximum X value seen to prevent graph from shrinking/resetting
+        self.max_x_seen = 10  # Start with 10 seconds as minimum view
+        
         # Apply the initial grid/labels/colors once at startup
         self._style_axes(self.ax1, "LIVE BPM TRACE", "BPM", show_x=True)
+        
+        # Set initial X-axis limit (Y will auto-scale)
+        self.ax1.set_xlim(0, self.max_x_seen)
+        self.ax1.set_ylim(0, 160) # Initial view
 
     def _style_axes(self, ax, title, ylabel, show_x=False):
         """Applies the dark theme, grid lines, and removes borders for a clean look."""
@@ -255,39 +267,103 @@ class LivePlotter:
         Receives a pandas DataFrame 'df' with the latest session data.
         Updates the graph lines efficiently.
         """
+        if df.empty:
+            return
+            
         # Ensure numeric types (handle "2400.00" strings or NaNs)
         t = pd.to_numeric(df["seconds"], errors='coerce')
         w = pd.to_numeric(df["walking_bpm"], errors='coerce')
         s = pd.to_numeric(df["song_bpm"], errors='coerce')
+        step_events = df["step_event"].copy() if "step_event" in df.columns else pd.Series([False] * len(df))
         
-        # Drop rows where critical data is NaN to prevent plotting errors
-        # (Optional: fillna(0) if preferred, but dropping is cleaner for graphs)
-        valid_mask = t.notna() & w.notna() & s.notna()
-        t = t[valid_mask]
-        w = w[valid_mask]
-        s = s[valid_mask]
+        # Drop rows where time or song_bpm is NaN
+        valid_mask = t.notna() & s.notna()
+        t = t[valid_mask].reset_index(drop=True)
+        w = w[valid_mask].reset_index(drop=True)
+        s = s[valid_mask].reset_index(drop=True)
+        step_events = step_events[valid_mask].reset_index(drop=True)
+        
+        if len(t) == 0:
+            return
+        
+        # Sample-and-Hold for Walking BPM (Blue Line)
+        # We only trust 'w' when a step actually occurred (step_event=True).
+        # Between steps, we persist the last known step value (Staircase).
+        # This ignores the 'decay' values sent by the estimator, preventing drops.
+        w = w.where(step_events, float("nan"))
+        
+        # SMOOTHING: Use Linear Interpolation to connect dots
+        w = w.interpolate(method='linear', limit_direction='both')
         
         # --- PLOT 1: BPM (Top) ---
-        if self.line_walker is None:
+        if self.line_song is None:
             # First run: Initialize the Line2D objects
-            self.line_walker, = self.ax1.plot(t, w, color="#3b82f6", lw=2, label="Walker")
+            self.line_walker, = self.ax1.plot(t, w, color="#1f77b4", lw=2, label="Walker")
             self.line_song, = self.ax1.plot(t, s, color="#10b981", lw=2, ls="--", label="Music")
             self.ax1.legend(facecolor=self.P["card_bg"], labelcolor="white", frameon=False, fontsize=8, loc="upper left")
         else:
             # Subsequent runs: Just update x and y data (Fast!)
-            self.line_walker.set_data(t, w)
+            # LIVE VIEW: Hide line, show dots only
+            self.line_walker.set_data([], []) 
             self.line_song.set_data(t, s)
             
-        # Re-calculate limits so the graph zooms out as time passes
-        self.ax1.relim()
-        self.ax1.autoscale_view()
+        # X-axis: Only expand, never shrink (prevents resetting)
+        # Track the maximum X value we've ever seen
+        current_max = t.max() if len(t) > 0 else 0
+        if current_max > self.max_x_seen:
+            self.max_x_seen = current_max
+        
+        # Always set xlim from 0 to max + buffer
+        self.ax1.set_xlim(0, self.max_x_seen + 5)
+        
+        # Y-axis: Custom Auto-Scaling (0 to 160 minimum)
+        # We want to see 0-160 at least, but expand if BPM goes higher.
+        
+        # Get max values from data (handling NaNs safely)
+        max_s = s.max() if len(s) > 0 and not pd.isna(s.max()) else 0
+        max_w = w.max() if len(w) > 0 and not pd.isna(w.max()) else 0
+        current_max = max(max_s, max_w)
+        
+        # Determine new upper limit (at least 160, or data + padding)
+        new_ymax = max(160, current_max + 10)
+        
+        self.ax1.set_ylim(0, new_ymax)
 
-        # Scatter points (Footsteps)
-        # For scatter, it's easier to remove and redraw the collection than update it.
-        if self.scat_steps: self.scat_steps.remove()
-        if df["step_event"].any(): 
-            sub = df[df["step_event"]]
-            self.scat_steps = self.ax1.scatter(sub["seconds"], sub["walking_bpm"], color="white", s=15, zorder=5)
+        # Scatter points (Footsteps) - with safety guards
+        try:
+            if self.scat_steps is not None:
+                self.scat_steps.remove()
+                self.scat_steps = None
+        except Exception:
+            self.scat_steps = None
+            
+        try:
+            if step_events.any():
+                step_t = t[step_events]
+                step_w = w[step_events]
+                if len(step_t) > 0:
+                    # Enhanced visibility: Red dots, smaller size (30)
+                    self.scat_steps = self.ax1.scatter(step_t, step_w, color="#ef4444", s=30, zorder=5)
+        except Exception:
+            pass  # Silently ignore scatter errors to prevent crashes
+
+    def finalize_plot(self, df):
+        """
+        Called when session stops to draw the final connected line.
+        """
+        if df.empty or self.line_walker is None: return
+        
+        # Ensure numeric
+        t = pd.to_numeric(df["seconds"], errors='coerce')
+        w = pd.to_numeric(df["walking_bpm"], errors='coerce')
+        step_events = df["step_event"].copy() if "step_event" in df.columns else pd.Series([False]*len(df))
+        
+        # Mask & Interpolate (Connect dots, NO trailing line)
+        w_smooth = w.where(step_events, float("nan"))
+        w_final = w_smooth.interpolate(method='linear', limit_area='inside')
+        
+        # Update line with full connected path
+        self.line_walker.set_data(t, w_final)
 
 
 if __name__ == "__main__":

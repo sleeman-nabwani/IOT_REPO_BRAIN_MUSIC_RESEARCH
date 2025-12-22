@@ -11,6 +11,7 @@ Usage:
     python main.py [midi_path] [--manual] [--bpm N] [--serial-port COMX]
 """
 import sys
+import time
 import serial
 import argparse
 import threading
@@ -18,6 +19,8 @@ from utils.midi_player import MidiBeatSync
 from utils.logger import Logger
 from utils.BPM_estimation import BPM_estimation
 from utils.comms import session_handshake, handle_engine_command, handle_step
+from utils.main_helper_functions import retrain_knn_model
+# from utils.safety import safe_execute
 
 #parse the arguments
 def parse_args() -> argparse.Namespace:
@@ -64,7 +67,22 @@ def parse_args() -> argparse.Namespace:
         help="Serial port for the ESP32 (default: COM5)",
     )
     return parser.parse_args()
+
+def start_stdin_listener(command_queue):
+    """
+    Reads from stdin in a separate thread and puts lines into the command queue.
+    Needed for SubprocessManager communication.
+    """
+    import threading
+    import sys
     
+    def _listen():
+        for line in sys.stdin:
+            command_queue.put(line.strip())
+    
+    t = threading.Thread(target=_listen, daemon=True)
+    t.start()
+
 def main(args, status_callback=print, stop_event=None, session_dir_callback=None, command_queue=None):
     midi_path = args.midi_path
     
@@ -121,7 +139,7 @@ def main(args, status_callback=print, stop_event=None, session_dir_callback=None
         return player, logger, bpm_estimation
 
     # Config from arguments
-    smoothing_window = getattr(args, 'smoothing_window', 3)
+    smoothing_window = getattr(args, 'smoothing', 3)
     stride = getattr(args, 'stride', 1)
 
     if not session_handshake(ser, logger, smoothing_window=smoothing_window, stride=stride):
@@ -145,7 +163,6 @@ def main(args, status_callback=print, stop_event=None, session_dir_callback=None
         command_queue = SimpleQueue()
         
         start_stdin_listener(command_queue)
-
     
     # ==================================================================================
     # MAIN LOOP
@@ -185,6 +202,9 @@ def main(args, status_callback=print, stop_event=None, session_dir_callback=None
         bpm_estimation.register_step(bpm)    
         logger.log_data(current_ts, player.walkingBPM, bpm, step_event=True)
         logger.log(f"Processed: BPM={bpm}")
+        
+        # CPU Yield (Prevent 100% core usage)
+        time.sleep(0.001)
         
     logger.log("Session ended")
     player.stop()

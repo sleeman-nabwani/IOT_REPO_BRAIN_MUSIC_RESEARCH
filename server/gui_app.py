@@ -513,6 +513,16 @@ class GuiApp:
         self.btn_start.configure(state="normal"); self.btn_stop.configure(state="disabled")
         self._set_led(self.led_run, False); self.log("Stopped")
         
+        # VISUAL: Connect dots on stop
+        try:
+            if self.live_data_buffer:
+                import pandas as pd
+                df = pd.DataFrame(self.live_data_buffer)
+                self.plotter.finalize_plot(df)
+                self.canvas.draw()
+        except Exception as e:
+            print(f"Final plot update failed: {e}")
+
         # Generate Post-Session Plot
         if self.current_session_dir:
             try:
@@ -679,10 +689,10 @@ class GuiApp:
         while not self.data_queue.empty():
             self.live_data_buffer.append(self.data_queue.get_nowait())
             
-        # SAFETY: Prevent infinite RAM growth. Keep last 10,000 points (~5-10 mins of high activity)
-        # If user wants full history, they check the CSV/PNG after session.
-        if len(self.live_data_buffer) > 10000:
-            self.live_data_buffer = self.live_data_buffer[-10000:]
+        # SAFETY: Prevent infinite RAM growth. Limit to 1,000,000 points (~3 hours)
+        # This ensures the user sees the FULL session history live.
+        if len(self.live_data_buffer) > 1000000:
+            self.live_data_buffer = self.live_data_buffer[-1000000:]
             
         if not self.live_data_buffer: return
 
