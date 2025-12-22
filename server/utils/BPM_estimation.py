@@ -23,6 +23,7 @@ class BPM_estimation:
         
         # Time-Based Smoothing
         self.last_update_time = time.time()
+        self.last_gui_log_time = time.time()
 
     # Added this in order to change the smoothing factor at runtime:
     # Added this in order to change the smoothing factor at runtime:
@@ -149,8 +150,11 @@ class BPM_estimation:
             
             # Log significant changes (Reduced spam)
             if abs(new_bpm - current_bpm) > 1.0:
-                 self.logger.log(f"BPM sliding: {current_bpm:.2f} -> {new_bpm:.2f} (Target: {self.target_bpm:.2f})")
+                self.logger.log(f"BPM sliding: {current_bpm:.2f} -> {new_bpm:.2f} (Target: {self.target_bpm:.2f})")
             
             # Log for the graph and broadcast to GUI
-            self.logger.log_data(time.time(), new_bpm, self.target_bpm)
+            # THROTTLE: Only log every 0.1s (10Hz) to prevent crashing the GUI pipe
+            if time.time() - self.last_gui_log_time > 0.1:
+                self.logger.log_data(time.time(), new_bpm, self.target_bpm)
+                self.last_gui_log_time = time.time()
 
