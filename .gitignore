@@ -3,9 +3,14 @@ server/.idea/
 server/__pycache__/
 server/utils/__pycache__/
 server/logs/
+server/utils/logs
 .vscode/
 .venv/
-research/results/plots/
-research/results/models/
-research/__pycache__/
 venv311/
+.cursor/
+server/utils/__pycache__
+research/processed_data
+research/__pycache__
+research/results/plots
+research/results/models/
+>>>>>>> 6662f5aebfbf846dbfee5cb8a7f1cdd91fbbdc51
