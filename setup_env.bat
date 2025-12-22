@@ -12,7 +12,7 @@ echo       BRAIN MUSIC INTERFACE - SETUP WIZARD
 echo ==================================================
 echo.
 echo This script will:
-echo   1. Create a Python Virtual Environment (venv311)
+echo   1. Create a Python Virtual Environment (.venv)
 echo   2. Upgrade pip
 echo   3. Install all dependencies (pandas, matplotlib, scikit-learn, etc.)
 echo   4. Train initial KNN model (if session data exists)
@@ -24,8 +24,8 @@ pause
 :: --------------------------
 echo.
 echo [1/4] Creating virtual environment...
-if not exist venv311 (
-    python -m venv venv311
+if not exist .venv (
+    python -m venv .venv
     if errorlevel 1 (
         echo Error creating venv! Make sure Python is installed and in your PATH.
         pause
@@ -40,15 +40,17 @@ if not exist venv311 (
 :: --------------------------
 echo.
 echo [2/4] Activating environment and upgrading pip...
-call venv311\Scripts\activate.bat
-python -m pip install --upgrade pip --quiet
+call .venv\Scripts\activate.bat
+echo Upgrading pip (this can take a few seconds)...
+python -m pip install --upgrade pip
 
 :: --------------------------
 :: Step 3: Install Dependencies
 :: --------------------------
 echo.
 echo [3/4] Installing dependencies...
-pip install -r requirements.txt --quiet
+echo Showing pip progress so you know it is running...
+pip install -r requirements.txt
 if errorlevel 1 (
     echo Error installing dependencies!
     pause

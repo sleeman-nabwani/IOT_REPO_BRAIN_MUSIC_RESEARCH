@@ -3,7 +3,7 @@
 :: BRAIN MUSIC INTERFACE - LAUNCHER SCRIPT
 :: ======================================================================================
 :: This script is the entry point for the user. It ensures the application runs
-:: inside the correct Python Virtual Environment (venv311) to avoid missing libraries.
+:: inside the correct Python Virtual Environment (.venv) to avoid missing libraries.
 
 title BRAIN MUSIC INTERFACE
 cls
@@ -16,12 +16,12 @@ echo.
 
 :: 2. Check for Virtual Environment
 :: We look for the 'activate.bat' script. If it exists, we run it to switch 
-:: python versions to the one in 'venv311'.
-if exist venv311\Scripts\activate.bat (
-    call venv311\Scripts\activate.bat
+:: python versions to the one in '.venv'.
+if exist .venv\Scripts\activate.bat (
+    call .venv\Scripts\activate.bat
 ) else (
     :: Error Handler: If the user hasn't run setup_env.bat yet
-    echo Error: Virtual environment 'venv311' not found.
+    echo Error: Virtual environment '.venv' not found.
     echo Please run 'setup_env.bat' first!
     pause
     exit /b
