@@ -150,7 +150,7 @@ class BPM_estimation:
             
             # Log significant changes (Reduced spam)
             if abs(new_bpm - current_bpm) > 1.0:
-                 self.logger.log(f"BPM sliding: {current_bpm:.2f} -> {new_bpm:.2f} (Target: {self.target_bpm:.2f})")
+                self.logger.log(f"BPM sliding: {current_bpm:.2f} -> {new_bpm:.2f} (Target: {self.target_bpm:.2f})")
             
             # Log for the graph and broadcast to GUI
             # THROTTLE: Only log every 0.1s (10Hz) to prevent crashing the GUI pipe
