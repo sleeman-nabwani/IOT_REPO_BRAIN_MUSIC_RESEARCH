@@ -14,6 +14,7 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 try:
     from utils.plotter import _elapsed_to_seconds, LivePlotter, generate_post_session_plot
     from utils.process_manager import SubprocessManager
+    from utils.robot_viz import RobotVisualizer
 except ImportError:
     pass
 
@@ -128,6 +129,7 @@ class GuiApp:
         main_body.pack(fill="both", expand=True, padx=25, pady=10)
         main_body.columnconfigure(0, weight=0, minsize=340)
         main_body.columnconfigure(1, weight=1)
+        main_body.columnconfigure(2, weight=0, minsize=220) # Robot Column
         main_body.rowconfigure(0, weight=1)
 
         # SIdebar Container (Holds Canvas + Scrollbar)
@@ -338,6 +340,14 @@ class GuiApp:
         
         plot_card = ttk.Frame(viz_root, style="Card.TFrame", padding=10)
         plot_card.pack(fill="both", expand=True)
+
+        # Robot Panel (Column 2)
+        # We need a frame for it
+        robot_root = ttk.Frame(main_body, style="Card.TFrame")
+        robot_root.grid(row=0, column=2, sticky="nsew", padx=(10, 0))
+        
+        # Initialize Robot
+        self.robot_viz = RobotVisualizer(robot_root, self.P, width=220, height=500)
         
         self.figure = Figure(figsize=(5, 4), dpi=100)
         self.figure.patch.set_facecolor(self.P["card_bg"])
@@ -912,8 +922,13 @@ class GuiApp:
         Reads from RAM Buffer (Fast!) instead of Disk CSV.
         """
         # 1. Drain Queue into RAM Buffer
+        has_step_event = False
         while not self.data_queue.empty():
-            self.live_data_buffer.append(self.data_queue.get_nowait())
+            item = self.data_queue.get_nowait()
+            self.live_data_buffer.append(item)
+            # Check for raw 'e' key (step event) being true in the packet
+            if item.get("e"): 
+                has_step_event = True
             
         # SAFETY: Prevent infinite RAM growth. Limit to 1,000,000 points (~3 hours)
         # This ensures the user sees the FULL session history live.
@@ -948,6 +963,21 @@ class GuiApp:
         # Delegate to Plotter
         self.plotter.update(df)
         self.figure.tight_layout(); self.canvas.draw_idle()
+        
+        # Update Robot
+        if not df.empty:
+            try:
+                # 1. Update BPM Speed
+                if "walking_bpm" in df.columns:
+                    last_bpm = df["walking_bpm"].iloc[-1]
+                    if pd.isna(last_bpm): last_bpm = 0.0
+                    self.robot_viz.update_bpm(last_bpm)
+                
+                # 2. Trigger Step Sync
+                if has_step_event:
+                    self.robot_viz.trigger_step()
+                    
+            except Exception: pass
 
     def update_plot_options(self):
         """Callback for the 2x/0.5x BPM checkboxes."""
