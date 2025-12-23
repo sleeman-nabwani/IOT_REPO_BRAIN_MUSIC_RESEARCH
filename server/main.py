@@ -64,13 +64,23 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--serial-port",
         type=str,
-        default="COM5",
-        help="Serial port for the ESP32 (default: COM5)",
+        default="COM6",
+        help="Serial port for the ESP32 (default: COM6)",
     )
     parser.add_argument(
         "--disable-knn",
         action="store_true",
         help="Disable KNN prediction for this run",
+    )
+    parser.add_argument(
+        "--alpha-up",
+        type=float,
+        help="Set the climbing (attack) smoothing factor",
+    )
+    parser.add_argument(
+        "--alpha-down",
+        type=float,
+        help="Set the cascading (decay) smoothing factor",
     )
     return parser.parse_args()
 
@@ -139,6 +149,12 @@ def main(args, status_callback=print, stop_event=None, session_dir_callback=None
     
     # 5. Initialize BPM Estimation
     bpm_estimation = BPM_estimation(player, logger, manual_mode=args.manual, manual_bpm=args.bpm, knn_predictor=knn_predictor)
+    
+    if args.alpha_up:
+        bpm_estimation.set_smoothing_alpha_up(args.alpha_up)
+    if args.alpha_down:
+        bpm_estimation.set_smoothing_alpha_down(args.alpha_down)
+        
     logger.log("Session started")
     
     # 6. Open Serial Port

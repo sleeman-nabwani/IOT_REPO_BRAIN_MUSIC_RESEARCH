@@ -109,10 +109,10 @@ def save_static_plot(df, folder):
 
     stats_msg = (
         "Tracking error stats (song - walking BPM)\n"
-        f"mean |Δ| = {mean_abs_delta:.2f} BPM\n"
-        f"max  |Δ| = {max_abs_delta:.2f} BPM"
+        f"mean |Delta| = {mean_abs_delta:.2f} BPM\n"
+        f"max |Delta| = {max_abs_delta:.2f} BPM"
     )
-    print(stats_msg.replace("\n", " | "))
+    # print(stats_msg.replace("\n", " | ")) # Optional debug print
 
     # Process Walking BPM for the line (Smooth, Connect dots)
     # 1. Mask non-steps (ignore decay)
@@ -120,7 +120,8 @@ def save_static_plot(df, folder):
     # 2. Linear Interpolate to connect dots (limit_area='inside' prevents trailing line)
     df["walking_plot"] = w_smooth.interpolate(method='linear', limit_area='inside')
 
-    fig, axes = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
+    # Larger figure size for better visibility (Mimic PDF full screen)
+    fig, axes = plt.subplots(2, 1, figsize=(9, 6), sharex=True)
 
     # Walker line restored for static plot (Connected Dots)
     axes[0].plot(
@@ -190,7 +191,7 @@ def save_static_plot(df, folder):
 
     axes[1].axhline(0, color="black", linewidth=0.8, linestyle="--")
     axes[1].set_xlabel("Time (s)")
-    axes[1].set_ylabel("Δ BPM (song - walking)")
+    axes[1].set_ylabel("Delta BPM (song - walking)")
     axes[1].legend()
     axes[1].grid(True, alpha=0.3)
 
@@ -205,18 +206,15 @@ def save_static_plot(df, folder):
     )
 
     fig.tight_layout(rect=(0, 0.05, 1, 1))
-    # Remove legacy PNG if it exists (live plot is display-only; static is PDF)
-    legacy_png = folder / "BPM_plot.png"
-    if legacy_png.exists():
-        try:
-            legacy_png.unlink()
-        except Exception:
-            pass
-
-    # Save high-definition PDF (preferred)
+    # Save high-definition PDF (preferred for print)
     fig_path_pdf = folder / "BPM_plot.pdf"
     fig.savefig(fig_path_pdf, bbox_inches="tight")
-    print(f"Plot saved to {fig_path_pdf}")
+    
+    # Save PNG for GUI Viewer (High Res)
+    fig_path_png = folder / "BPM_plot.png"
+    fig.savefig(fig_path_png, bbox_inches="tight", dpi=120)
+    
+    print(f"Plot saved to {fig_path_png}")
     
     # Clean up memory
     plt.close(fig)
@@ -245,6 +243,9 @@ class LivePlotter:
         
         self.scat_steps = None
         
+        self.show_double = False
+        self.show_half = False
+
         # Track maximum X value seen to prevent graph from shrinking/resetting
         self.max_x_seen = 10  # Start with 10 seconds as minimum view
         
@@ -254,6 +255,10 @@ class LivePlotter:
         # Set initial X-axis limit (Y will auto-scale)
         self.ax1.set_xlim(0, self.max_x_seen)
         self.ax1.set_ylim(0, 160) # Initial view
+        
+    def set_show_multipliers(self, double, half):
+        self.show_double = double
+        self.show_half = half
 
     def _style_axes(self, ax, title, ylabel, show_x=False):
         """Applies the dark theme, grid lines, and removes borders for a clean look."""
@@ -320,6 +325,11 @@ class LivePlotter:
             # First run: Initialize the Line2D objects
             self.line_walker, = self.ax1.plot(t, w, color="#1f77b4", lw=2, label="Walker")
             self.line_song, = self.ax1.plot(t, s, color="#10b981", lw=2, ls="--", label="Music")
+            
+            # Additional optional reference lines
+            self.line_double, = self.ax1.plot([], [], color="#8b5cf6", lw=1.5, ls=":", label="2x Song", alpha=0.7)
+            self.line_half, = self.ax1.plot([], [], color="#ec4899", lw=1.5, ls=":", label="0.5x Song", alpha=0.7)
+            
             self.ax1.legend(facecolor=self.P["card_bg"], labelcolor="white", frameon=False, fontsize=8, loc="upper left")
         else:
             # Lines will be updated after scatter so points appear first
@@ -334,17 +344,22 @@ class LivePlotter:
         # Always set xlim from 0 to max + buffer
         self.ax1.set_xlim(0, self.max_x_seen + 5)
         
-        # Y-axis: Custom Auto-Scaling (0 to 160 minimum)
-        # We want to see 0-160 at least, but expand if BPM goes higher.
+        # Calculate multiples
+        s_double = s * 2
+        s_half = s * 0.5
         
-        # Get max values from data (handling NaNs safely)
+        # Y-axis Auto-Scaling
+        # We need to account for the new lines if they are visible
         max_s = s.max() if len(s) > 0 and not pd.isna(s.max()) else 0
         max_w = w.max() if len(w) > 0 and not pd.isna(w.max()) else 0
+        
         current_max = max(max_s, max_w)
+        if self.show_double: 
+            max_d = s_double.max() if len(s_double)>0 else 0
+            current_max = max(current_max, max_d)
         
-        # Determine new upper limit (at least 160, or data + padding)
+        # Determine new upper limit (at least 160)
         new_ymax = max(160, current_max + 10)
-        
         self.ax1.set_ylim(0, new_ymax)
 
         # Scatter points (Footsteps) - with safety guards
@@ -365,10 +380,20 @@ class LivePlotter:
         except Exception:
             pass  # Silently ignore scatter errors to prevent crashes
 
-        # Update lines after scatter so they render beneath dots in the same draw
+        # Update lines
         if self.line_song is not None:
             self.line_walker.set_data(t, w)
             self.line_song.set_data(t, s)
+            
+            if self.show_double:
+                self.line_double.set_data(t, s_double)
+            else:
+                self.line_double.set_data([], [])
+                
+            if self.show_half:
+                self.line_half.set_data(t, s_half)
+            else:
+                self.line_half.set_data([], [])
 
     def finalize_plot(self, df):
         """

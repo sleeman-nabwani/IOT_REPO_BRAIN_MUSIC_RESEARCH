@@ -12,7 +12,7 @@ class SubprocessManager:
     - Writes commands to its STDIN.
     - Reads logs from its STDOUT.
     """
-    def __init__(self, midi_path, serial_port, manual_mode, manual_bpm, smoothing_window, stride, log_callback, session_dir_callback, data_callback=None, session_name=None):
+    def __init__(self, midi_path, serial_port, manual_mode, manual_bpm, smoothing_window, stride, log_callback, session_dir_callback, data_callback=None, session_name=None, alpha_up=None, alpha_down=None):
         self.log_callback = log_callback
         self.session_dir_callback = session_dir_callback
         self.data_callback = data_callback
@@ -35,6 +35,11 @@ class SubprocessManager:
         # We pass initial config via flags
         cmd.extend(["--smoothing", str(smoothing_window)])
         cmd.extend(["--stride", str(stride)])
+        
+        if alpha_up:
+            cmd.extend(["--alpha-up", str(alpha_up)])
+        if alpha_down:
+            cmd.extend(["--alpha-down", str(alpha_down)])
         
         if session_name:
              cmd.extend(["--session-name", str(session_name)])
