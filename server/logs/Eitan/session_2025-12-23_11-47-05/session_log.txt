@@ -1,0 +1,39 @@
+Session log started at 2025-12-23_11-47-05 (t=0.000)
+[00:00:00.004] DEBUG: Attempting to initialize MidiBeatSync...
+[00:00:00.076] DEBUG: MidiBeatSync initialized successfully.
+[00:00:00.078] Starting in DYNAMIC MODE
+[00:00:02.850] KNN prediction enabled
+[00:00:02.851] Session started
+[00:00:02.851] DEBUG: Attempting to open serial port COM3...
+[00:00:02.920] DEBUG: Serial port COM3 opened successfully.
+[00:00:03.422] Setting smoothing window to 8
+[00:00:03.525] Smoothing window set response: ACK,WINDOW,8
+[00:00:03.525] Setting update stride to 1
+[00:00:03.627] Update stride set response: ACK,STRIDE,1
+[00:00:03.729] ACK,RESET received
+[00:00:03.832] ACK,START received
+[00:00:03.833] Session handshake completed
+[00:00:03.843] Running main loop...
+[00:00:10.131] Config: Manual BPM set to 100.0
+[00:00:17.945] Processed: BPM=119.87431329982155
+[00:00:18.755] Config: Manual BPM set to 80.0
+[00:00:21.542] Config: Manual BPM set to 80.0
+[00:00:23.729] Processed: BPM=10.37
+[00:00:23.731] BPM sliding: 80.00 -> 22.13 (Target: 10.37)
+[00:00:27.849] Config: Manual BPM set to 80.0
+[00:00:30.093] Config: Manual BPM set to 80.0
+[00:00:30.795] Config: Manual BPM set to 80.0
+[00:00:31.114] Config: Manual BPM set to 80.0
+[00:00:31.383] Config: Manual BPM set to 80.0
+[00:00:31.648] Config: Manual BPM set to 80.0
+[00:00:31.857] Config: Manual BPM set to 80.0
+[00:00:32.100] Config: Manual BPM set to 80.0
+[00:00:32.325] Config: Manual BPM set to 80.0
+[00:00:32.581] Config: Manual BPM set to 80.0
+[00:00:32.741] Config: Manual BPM set to 80.0
+[00:00:32.973] Config: Manual BPM set to 80.0
+[00:00:33.100] Config: Manual BPM set to 80.0
+[00:00:33.331] Config: Manual BPM set to 80.0
+[00:00:33.583] Config: Manual BPM set to 80.0
+[00:00:39.477] Config: Manual BPM set to 80.0
+[00:00:39.678] Config: Manual BPM set to 80.0

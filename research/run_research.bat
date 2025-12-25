@@ -17,11 +17,11 @@ echo.
 cd /d "%~dp0.."
 
 :: Activate Virtual Environment
-if exist venv311\Scripts\activate.bat (
-    call venv311\Scripts\activate.bat
+if exist .venv\Scripts\activate.bat (
+    call .venv\Scripts\activate.bat
     echo Virtual environment activated.
 ) else (
-    echo Error: Virtual environment 'venv311' not found.
+    echo Error: Virtual environment '.venv' not found.
     echo Please run 'setup_env.bat' first!
     pause
     exit /b 1

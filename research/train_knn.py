@@ -43,8 +43,10 @@ def prepare_dataset(df, window_size=3):
 def train_knn_model():
     # 1. Load Data
     print("Loading data...")
-    logs_dir = r"../server/logs/Default"
-    df = load_all_sessions(logs_dir)
+    # Scan all user/session folders under server/logs recursively
+    BASE_DIR = Path(__file__).resolve().parent.parent
+    logs_dir = BASE_DIR / "server" / "logs"
+    df = load_all_sessions(str(logs_dir))
     
     if df.empty:
         print("No data found! Run some sessions first.")
