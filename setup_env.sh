@@ -39,6 +39,13 @@ if ! command -v python3 &> /dev/null; then
     fi
 fi
 
+# Ensure the venv module is available (needed on Debian/Ubuntu: python3-venv)
+if ! $PYTHON_CMD -c "import venv, ensurepip" 2> /dev/null; then
+    echo "Error: Python venv/ensurepip modules not available."
+    echo "Install them (e.g., 'sudo apt install -y python3.10-venv') and rerun."
+    exit 1
+fi
+
 if [ ! -d ".venv" ]; then
     $PYTHON_CMD -m venv .venv
     if [ $? -ne 0 ]; then
@@ -49,12 +56,49 @@ else
     echo "Virtual environment already exists, skipping creation."
 fi
 
+if [ ! -f ".venv/bin/activate" ]; then
+    echo "Virtual environment is missing '.venv/bin/activate'."
+    echo "Remove '.venv' and rerun this script."
+    exit 1
+fi
+
 # 2. Activate Environment
 echo
 echo "[2/4] Activating environment and upgrading pip..."
 source .venv/bin/activate
 echo "Upgrading pip..."
 pip install --upgrade pip
+
+# 2b. Ensure Tkinter is available (system package, not installed via pip)
+echo
+echo "[2b] Checking Tkinter (python3-tk)..."
+python - <<'PY'
+try:
+    import tkinter  # noqa: F401
+    print("Tkinter available.")
+except Exception:
+    raise SystemExit(1)
+PY
+
+if [ $? -ne 0 ]; then
+    echo "Tkinter not available."
+    if command -v apt-get >/dev/null 2>&1; then
+        read -p "Install python3-tk via 'sudo apt-get install -y python3-tk'? [y/N]: " REPLY
+        if [[ "$REPLY" =~ ^[Yy]$ ]]; then
+            sudo apt-get update && sudo apt-get install -y python3-tk
+            if [ $? -ne 0 ]; then
+                echo "Failed to install python3-tk. Please install it manually and rerun."
+                exit 1
+            fi
+        else
+            echo "Please install python3-tk manually and rerun the setup."
+            exit 1
+        fi
+    else
+        echo "Install Tkinter for your platform (e.g., python3-tk on Debian/Ubuntu) and rerun."
+        exit 1
+    fi
+fi
 
 # 3. Install Dependencies
 echo
