@@ -64,8 +64,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--serial-port",
         type=str,
-        default="COM6",
-        help="Serial port for the ESP32 (default: COM6)",
+        default="COM3",
+        help="Serial port for the ESP32 (default: COM3)",
     )
     parser.add_argument(
         "--disable-knn",
@@ -127,6 +127,12 @@ def main(args, status_callback=print, stop_event=None, session_dir_callback=None
         print(f"CRITICAL ERROR: {e}")
         sys.stdout.flush()
         return None, logger, None
+    
+    # Seed initial GUI data so song BPM appears immediately
+    try:
+        logger.log_data(time.time(), player.walkingBPM, player.walkingBPM, step_event=False)
+    except Exception:
+        pass
     
     # 3. Log Mode
     if args.manual:
@@ -212,11 +218,10 @@ def main(args, status_callback=print, stop_event=None, session_dir_callback=None
                 stop_event = threading.Event()
                 stop_event.set()
                 break
-          
-        # ANIMATION: We must run update_bpm() every loop iteration.
-        # This now also handles any pending manual BPM updates internally.
-        if not args.manual:
-            bpm_estimation.update_bpm()
+        
+        # ANIMATION: Run update_bpm() every loop iteration (manual or dynamic).
+        # In manual mode this still emits log packets each loop for plotting.
+        bpm_estimation.update_bpm()
             
         # read the step from the serial port
         raw_line = ser.readline()

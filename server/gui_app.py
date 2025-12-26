@@ -95,6 +95,8 @@ class GuiApp:
         self.data_queue = SimpleQueue()
         self.current_session_dir = None
         self.live_data_buffer = []
+        # Limit how many recent points are kept/rendered to avoid UI lag
+        self.max_live_points = 2000  # smaller window for smoother Tk/Matplotlib
         self.is_running = False
         self.is_app_active = True
         
@@ -452,6 +454,13 @@ class GuiApp:
     def start_session(self):
         """Action for the 'START SESSION' button."""
         if self.is_running: return
+        
+        # Clear any leftover live data/plot from previous session
+        self.live_data_buffer = []
+        while not self.data_queue.empty():
+            self.data_queue.get_nowait()
+        self.plotter.reset()
+        self.canvas.draw_idle()
         
         # Resolve MIDI Path (Dropdown Name -> Full Path)
         m_name = self.midi_var.get()
@@ -914,11 +923,10 @@ class GuiApp:
         # 1. Drain Queue into RAM Buffer
         while not self.data_queue.empty():
             self.live_data_buffer.append(self.data_queue.get_nowait())
-            
-        # SAFETY: Prevent infinite RAM growth. Limit to 1,000,000 points (~3 hours)
-        # This ensures the user sees the FULL session history live.
-        if len(self.live_data_buffer) > 1000000:
-            self.live_data_buffer = self.live_data_buffer[-1000000:]
+        
+        # SAFETY: trim to recent window to keep Tk/Matplotlib responsive
+        if len(self.live_data_buffer) > self.max_live_points:
+            self.live_data_buffer = self.live_data_buffer[-self.max_live_points:]
             
         if not self.live_data_buffer: return
 
@@ -927,6 +935,10 @@ class GuiApp:
             # We construct DataFrame from list of dicts (Very fast)
             # Keys: t, s, w, e
             df = pd.DataFrame(self.live_data_buffer)
+
+            # Keep only the most recent window before plotting to reduce draw cost
+            if len(df) > self.max_live_points:
+                df = df.tail(self.max_live_points).reset_index(drop=True)
             
             # Rename match plotter expectations
             # Packet keys: t=time_str, s=song, w=walking, e=event
