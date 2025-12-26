@@ -244,9 +244,6 @@ class GuiApp:
         
         ttk.Label(self.manual_bpm_frame, text="Target BPM", style="CardHeader.TLabel").pack(anchor="w")
         
-        bpm_row = ttk.Frame(self.manual_bpm_frame, style="Card.TFrame")
-        bpm_row.pack(fill="x", pady=5)
-        
         # BPM Slider
         self.manual_bpm_var = tk.DoubleVar(value=100.0)
         
