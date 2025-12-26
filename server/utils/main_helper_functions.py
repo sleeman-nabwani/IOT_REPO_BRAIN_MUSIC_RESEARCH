@@ -10,24 +10,32 @@ from .safety import safe_execute
 
 
 @safe_execute
-def retrain_knn_model():
+def retrain_prediction_model():
     """
-    Auto-retrain KNN model after session ends.
-    Uses the latest session data to improve predictions.
+    Auto-retrain prediction model after session ends.
+    Primary: LightGBM (research/LightGBM/train_lgbm.py).
+    Fallback: KNN (research/train_knn.py) if LightGBM script is missing.
     """
     research_dir = Path(__file__).parent.parent.parent / "research"
-    train_script = research_dir / "train_knn.py"
-    
-    if train_script.exists():
-        print("[KNN] Retraining model with new data...")
+    train_lgbm = research_dir / "LightGBM" / "train_lgbm.py"
+    train_knn = research_dir / "train_knn.py"
+
+    target_script = None
+    if train_lgbm.exists():
+        target_script = train_lgbm
+    elif train_knn.exists():
+        target_script = train_knn
+
+    if target_script:
+        print(f"[Prediction] Retraining model with new data using {target_script.name}...")
         result = subprocess.run(
-            [sys.executable, str(train_script)],
+            [sys.executable, str(target_script)],
             cwd=str(research_dir),
             capture_output=True,
             text=True,
             timeout=60
         )
         if result.returncode == 0:
-            print("[KNN] Model updated successfully!")
+            print("[Prediction] Model updated successfully!")
         else:
-            print(f"[KNN] Training failed: {result.stderr[:200]}")
+            print(f"[Prediction] Training failed: {result.stderr[:200]}")

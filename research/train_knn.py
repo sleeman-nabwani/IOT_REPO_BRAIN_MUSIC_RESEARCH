@@ -16,7 +16,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_absolute_error, r2_score
 import matplotlib.pyplot as plt
 from pathlib import Path
-from analyze_data import load_all_sessions
+from analyze_data import load_all_sessions, remove_spikes
 
 # Output directories for results
 RESULTS_DIR = Path(__file__).parent / "results"
@@ -24,6 +24,16 @@ PLOTS_DIR = RESULTS_DIR / "plots"
 MODELS_DIR = RESULTS_DIR / "models"
 PLOTS_DIR.mkdir(parents=True, exist_ok=True)
 MODELS_DIR.mkdir(parents=True, exist_ok=True)
+
+def filter_true_steps(df: pd.DataFrame) -> pd.DataFrame:
+    """Keep only rows marked as true steps if the column exists."""
+    if "step_event" not in df.columns:
+        return df
+    mask = df["step_event"]
+    if mask.dtype == object:
+        mask = mask.astype(str).str.lower() == "true"
+    return df[mask].copy()
+
 
 def prepare_dataset(df, window_size=3):
     """
@@ -54,6 +64,9 @@ def train_knn_model():
 
     # Filter Valid Data
     df = df[df['walking_bpm'] > 0]
+    df = filter_true_steps(df)
+    df = remove_spikes(df, col="walking_bpm", window=5, threshold=200)
+    df = df[df["walking_bpm"] <= 400]
     print(f"Training on {len(df)} steps.")
 
     # 2. Auto-Tune: Find optimal lookback window
