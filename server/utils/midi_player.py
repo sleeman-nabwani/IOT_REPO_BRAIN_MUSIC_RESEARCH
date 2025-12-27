@@ -72,7 +72,7 @@ class MidiBeatSync :
                         remaining = target - now
                         if remaining <= 0:
                             break
-                        time.sleep(min(0.005, remaining))
+                        time.sleep(min(0.001, remaining))
                         # updating the tempo factor mid-wait
                         with self._lock:
                             new_tf = self.TempoFactor

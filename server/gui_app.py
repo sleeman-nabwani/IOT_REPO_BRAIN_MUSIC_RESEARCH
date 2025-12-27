@@ -95,6 +95,8 @@ class GuiApp:
         self.data_queue = SimpleQueue()
         self.current_session_dir = None
         self.live_data_buffer = []
+        # Limit how many recent points are kept/rendered to avoid UI lag
+        self.max_live_points = 2000  # smaller window for smoother Tk/Matplotlib
         self.is_running = False
         self.is_app_active = True
         
@@ -168,6 +170,29 @@ class GuiApp:
         self.canvas_sidebar.bind("<Configure>", _configure_canvas)
         
         def section(title): ttk.Label(sidebar, text=title.upper(), style="CardHeader.TLabel").pack(anchor="w", pady=(15, 8))
+        
+        # ANALYSIS SECTION
+        section("Analysis")
+        # Row 1: Subject Folder
+        self.analysis_row1 = ttk.Frame(sidebar, style="Card.TFrame")
+        self.analysis_row1.pack(fill="x", pady=(0, 2))
+        
+        self.subject_var = tk.StringVar()
+        self.subject_combo = ttk.Combobox(self.analysis_row1, textvariable=self.subject_var, state="readonly", height=15)
+        self.subject_combo.pack(side="left", fill="x", expand=True, padx=(0, 5))
+        self.subject_combo.bind("<<ComboboxSelected>>", self.on_subject_selected)
+        
+        ttk.Button(self.analysis_row1, text="🔄", style="Compact.TButton", width=3, command=self.refresh_analysis_subjects).pack(side="right")
+
+        # Row 2: Session List + View Button
+        self.analysis_row2 = ttk.Frame(sidebar, style="Card.TFrame")
+        self.analysis_row2.pack(fill="x", pady=(0, 5))
+        
+        self.session_var = tk.StringVar()
+        self.session_combo = ttk.Combobox(self.analysis_row2, textvariable=self.session_var, state="readonly", height=15)
+        self.session_combo.pack(side="left", fill="x", expand=True, padx=(0, 5))
+        
+        ttk.Button(self.analysis_row2, text="📊", style="Compact.TButton", width=3, command=self.view_session_plot).pack(side="right")
 
         # MIDI Track Selection
         ttk.Label(sidebar, text="MIDI TRACK", style="CardHeader.TLabel").pack(anchor="w")
@@ -219,17 +244,18 @@ class GuiApp:
         
         ttk.Label(self.manual_bpm_frame, text="Target BPM", style="CardHeader.TLabel").pack(anchor="w")
         
+        # BPM Slider
+        self.manual_bpm_var = tk.DoubleVar(value=100.0)
+        
         bpm_row = ttk.Frame(self.manual_bpm_frame, style="Card.TFrame")
         bpm_row.pack(fill="x", pady=5)
         
-        self.manual_bpm_var = tk.StringVar(value="100")
-        self.bpm_entry = ttk.Entry(bpm_row, textvariable=self.manual_bpm_var, width=6)
-        self.bpm_entry.pack(side="left", padx=(0, 5))
-        
-        self.btn_set_bpm = tk.Button(bpm_row, text="Set", font=("Segoe UI", 9, "bold"),
-                  bg=self.P["accent"], fg="white", activebackground=self.P["accent_hover"],
-                  relief="flat", padx=10, command=self.apply_manual_bpm)
-        self.btn_set_bpm.pack(side="left")
+        self.bpm_val_label = ttk.Label(bpm_row, text="100 BPM", style="Sub.TLabel", width=10)
+        self.bpm_val_label.pack(side="right", padx=5)
+
+        self.bpm_slider = ttk.Scale(bpm_row, from_=0, to=400, orient="horizontal", 
+                                   variable=self.manual_bpm_var, command=self.on_bpm_slider_change)
+        self.bpm_slider.pack(side="left", fill="x", expand=True, padx=5)
 
         # SMOOTHING CONTROL (Climbing & Cascading)
         ttk.Label(sidebar, text="CLIMBING (SPEEDING UP)", style="CardHeader.TLabel").pack(anchor="w", pady=(15, 0))
@@ -242,10 +268,6 @@ class GuiApp:
         entry_up.pack(side="left", padx=(0, 5))
         self._bind_placeholder(entry_up, self.smoothing_up_var, "Set Climbing")
         
-        tk.Button(attack_row, text="Set", font=("Segoe UI", 9, "bold"),
-                  bg=self.P["accent"], fg="white", activebackground=self.P["accent_hover"],
-                  relief="flat", padx=10, command=self.apply_smoothing_up).pack(side="left")
-
         ttk.Button(attack_row, text="?", style="Help.TButton", width=2, command=self.show_attack_help).pack(side="left", padx=5)
 
         # Cascading
@@ -258,10 +280,6 @@ class GuiApp:
         entry_down = ttk.Entry(decay_row, textvariable=self.smoothing_down_var, width=15, font=("Segoe UI", 12))
         entry_down.pack(side="left", padx=(0, 5))
         self._bind_placeholder(entry_down, self.smoothing_down_var, "Set Cascading")
-        
-        tk.Button(decay_row, text="Set", font=("Segoe UI", 9, "bold"),
-                  bg=self.P["accent"], fg="white", activebackground=self.P["accent_hover"],
-                  relief="flat", padx=10, command=self.apply_smoothing_down).pack(side="left")
 
         ttk.Button(decay_row, text="?", style="Help.TButton", width=2, command=self.show_decay_help).pack(side="left", padx=5)
 
@@ -275,8 +293,6 @@ class GuiApp:
         entry_win.pack(side="left", padx=(0, 5))
         self._bind_placeholder(entry_win, self.step_window_var, "Set Window")
         ttk.Label(window_row, text="Steps", style="Sub.TLabel").pack(side="left", padx=(0, 5))
-        ttk.Button(window_row, text="Set", style="CompactPrimary.TButton", width=4, 
-                   command=lambda: self.apply_esp_config("window", self.step_window_var)).pack(side="left")
         ttk.Button(window_row, text="?", style="Help.TButton", width=2, command=self.show_window_help).pack(side="left", padx=5)
 
         # STRIDE CONFIG 
@@ -288,8 +304,6 @@ class GuiApp:
         entry_stride.pack(side="left", padx=(0, 5))
         self._bind_placeholder(entry_stride, self.stride_var, "Set Stride")
         ttk.Label(stride_row, text="Steps", style="Sub.TLabel").pack(side="left", padx=(0, 5))
-        ttk.Button(stride_row, text="Set", style="CompactPrimary.TButton", width=4,
-                   command=lambda: self.apply_esp_config("stride", self.stride_var)).pack(side="left")
         ttk.Button(stride_row, text="?", style="Help.TButton", width=2, command=self.show_stride_help).pack(side="left", padx=5)
         
         # --- BOTTOM CONTROLS ---
@@ -308,6 +322,19 @@ class GuiApp:
         # Visualization
         viz_root = ttk.Frame(main_body, style="TFrame")
         viz_root.grid(row=0, column=1, sticky="nsew")
+        # Visualization Controls
+        viz_controls = ttk.Frame(viz_root, style="TFrame")
+        viz_controls.pack(fill="x", pady=(0, 5))
+        
+        self.show_2x_var = tk.BooleanVar(value=False)
+        self.show_half_var = tk.BooleanVar(value=False)
+        
+        # Checkboxes
+        ttk.Checkbutton(viz_controls, text="Show 2x BPM", variable=self.show_2x_var, 
+                        command=self.update_plot_options).pack(side="right", padx=10)
+        ttk.Checkbutton(viz_controls, text="Show 0.5x BPM", variable=self.show_half_var, 
+                        command=self.update_plot_options).pack(side="right", padx=10)
+        
         plot_card = ttk.Frame(viz_root, style="Card.TFrame", padding=10)
         plot_card.pack(fill="both", expand=True)
         
@@ -338,6 +365,159 @@ class GuiApp:
             
         self.refresh_session_list() # Init session list
         self.refresh_midi_list()    # Init MIDI list
+        self.refresh_analysis_subjects() # Init Analysis list
+
+    def _draw_led(self, x, y, l, c):
+        r=6; o=self.led_canvas.create_oval(x-r, y-r, x+r, y+r, fill=c, outline="")
+        self.led_canvas.create_text(x+15, y, text=l, anchor="w", fill=self.P["text_sub"], font=("Segoe UI", 9))
+        return o
+
+    def _set_led(self, i, a, c=None): self.led_canvas.itemconfig(i, fill=(c if c else self.P["success"]) if a else self.P["input_bg"])
+
+    def log(self, msg): self.status_var.set(msg)
+    def choose_midi(self): 
+        p = filedialog.askopenfilename(filetypes=[("MIDI", ".mid"), ("All", ".*")])
+        if p: self.midi_var.set(p)
+
+    def refresh_ports(self):
+        """Populate the combobox with detected serial ports."""
+        if not SERIAL_AVAILABLE: return
+        ports = serial.tools.list_ports.comports()
+        values = [f"{p.device} - {p.description}" for p in ports]
+        self.port_combo['values'] = values
+        if values:
+            self.port_combo.current(0)
+        else:
+            self.port_combo.set("No devices found")
+            
+    def get_midi_files(self):
+        """Scans midi_files/ directory."""
+        try:
+            return [f.name for f in Path(__file__).resolve().parent.parent.joinpath("midi_files").glob("*.mid")]
+        except: return []
+
+    def refresh_midi_list(self):
+        self.midi_combo['values'] = self.get_midi_files()
+        if self.midi_combo['values']: self.midi_combo.current(0)
+    
+    def on_bpm_slider_change(self, val):
+        """Handle slider movement with real-time update."""
+        bpm = float(val)
+        self.bpm_val_label.configure(text=f"{int(bpm)} BPM")
+        
+        # If in manual mode and running, update immediately
+        if self.mode_var.get() == "manual":
+            if self.session_thread: 
+                self.session_thread.update_manual_bpm(bpm)
+            # We don't log every single slide event to avoid spam, 
+            # maybe just update label.
+            
+    def get_selected_port(self):
+        val = self.port_var.get() if not SERIAL_AVAILABLE else self.port_combo.get()
+        return val.split(" - ")[0] if " - " in val else val
+
+    def on_mode_change(self):
+        m = self.mode_var.get()
+        if m == "manual":
+            # Enable BPM controls
+            for child in self.manual_bpm_frame.winfo_children():
+                try: child.configure(state="normal")
+                except: pass
+            # Also the inner frames
+            for child in self.manual_bpm_frame.winfo_children():
+                if isinstance(child, ttk.Frame):
+                    for gc in child.winfo_children():
+                         try: gc.configure(state="normal")
+                         except: pass
+            
+            if self.session_thread: self.session_thread.set_manual_mode(True)
+            
+            # Apply current BPM
+            self.on_bpm_slider_change(self.manual_bpm_var.get())
+            
+        else:
+            # Disable BPM controls
+            for child in self.manual_bpm_frame.winfo_children():
+                 try: child.configure(state="disabled")
+                 except: pass
+            for child in self.manual_bpm_frame.winfo_children():
+                if isinstance(child, ttk.Frame):
+                    for gc in child.winfo_children():
+                         try: gc.configure(state="disabled")
+                         except: pass
+            
+            if self.session_thread: self.session_thread.set_manual_mode(False)
+
+    def start_session(self):
+        """Action for the 'START SESSION' button."""
+        if self.is_running: return
+        
+        # Clear any leftover live data/plot from previous session
+        self.live_data_buffer = []
+        while not self.data_queue.empty():
+            self.data_queue.get_nowait()
+        self.plotter.reset()
+        self.canvas.draw_idle()
+        
+        # Resolve MIDI Path (Dropdown Name -> Full Path)
+        m_name = self.midi_var.get()
+        # Check if absolute path (from file picker) or relative (from dropdown)
+        if Path(m_name).exists():
+            p = Path(m_name)
+        else:
+            # Try finding it in midi_files
+            p = Path(__file__).resolve().parent.parent / "midi_files" / m_name
+            
+        if not p.exists(): messagebox.showerror("Error", f"MIDI not found: {m_name}"); return
+        
+        port = self.get_selected_port()
+        if not port or "No devices" in port:
+            messagebox.showerror("Error", "Please select a valid Serial Port")
+            return
+
+        # Prepare parameters
+        mm = self.mode_var.get() == "manual"
+        # BPM is now from DoubleVar
+        mb = self.manual_bpm_var.get() if mm else None
+        
+        # Session Name
+        s_name = self.session_name_var.get().strip()
+        if not s_name: s_name = None # Let logger generate timestamp
+
+        try:
+            raw_sw = self.step_window_var.get().strip()
+            sw = int(raw_sw) if raw_sw and raw_sw.isdigit() else 6 
+        except: sw = 6 
+
+        try:
+            raw_st = self.stride_var.get().strip()
+            st = int(raw_st) if raw_st and raw_st.isdigit() else 1
+        except: st = 1
+
+        # Climbing/Cascading Alphas
+        au = None
+        try:
+            val = self.smoothing_up_var.get().strip()
+            if val: au = float(val)
+        except: pass
+        
+        ad = None
+        try:
+            val = self.smoothing_down_var.get().strip()
+            if val: ad = float(val)
+        except: pass
+
+        # Create and start the Subprocess Manager
+        self.session_thread = SubprocessManager(str(p), port, mm, mb, sw, st, self.enqueue_status, self.enqueue_session_dir, self.enqueue_data, session_name=s_name, alpha_up=au, alpha_down=ad)
+        
+        # Reset RAM Buffer
+        self.live_data_buffer = [] 
+        # self.session_thread.start() # No longer needed as init starts it
+        
+        # Update UI state
+        self.is_running = True
+        self.btn_start.configure(state="disabled"); self.btn_stop.configure(state="normal")
+        self._set_led(self.led_run, True, self.P["warning"]); self.log(f"Session running on {port}")
 
     def _draw_led(self, x, y, l, c):
         r=6; o=self.led_canvas.create_oval(x-r, y-r, x+r, y+r, fill=c, outline="")
@@ -428,83 +608,140 @@ class GuiApp:
         # Don't auto-select to preserve user input intent if they are typing
 
 
-    def get_selected_port(self):
-        """Extract just the COM port from the selection string 'COM3 - Arduino Uno'."""
-        val = self.port_var.get()
-        if " - " in val:
-            return val.split(" - ")[0]
-        return val
+    def refresh_analysis_subjects(self):
+        """Populate the first dropdown with Subject/Folder names."""
+        try:
+            log_dir = Path(__file__).resolve().parent / "logs"
+            if not log_dir.exists(): 
+                self.subject_combo['values'] = []
+                return
 
-    # --- CALLBACKS & UI UPDATES ---
-    
-    def on_mode_change(self):
-        """Called when user clicks Dynamic/Manual radio buttons."""
-        manual = self.mode_var.get() == "manual"
-        
-        # If session is running, update it in real-time
-        if self.session_thread: self.session_thread.set_manual_mode(manual)
-        
-        # Toggle UI Controls (Enable/Disable BPM input)
-        s = "normal" if manual else "disabled"
-        self.bpm_entry.configure(state=s)
-        self.btn_set_bpm.configure(state=s)
-        self.log(f"Mode: {'Manual' if manual else 'Dynamic'}")
-
-    def start_session(self):
-        """Action for the 'START SESSION' button."""
-        if self.is_running: return
-        
-        # Resolve MIDI Path (Dropdown Name -> Full Path)
-        m_name = self.midi_var.get()
-        # Check if absolute path (from file picker) or relative (from dropdown)
-        if Path(m_name).exists():
-            p = Path(m_name)
-        else:
-            # Try finding it in midi_files
-            p = Path(__file__).resolve().parent.parent / "midi_files" / m_name
+            # Get just the directories (subjects)
+            subjects = [d.name for d in log_dir.iterdir() if d.is_dir()]
+            subjects.sort()
             
-        if not p.exists(): messagebox.showerror("Error", f"MIDI not found: {m_name}"); return
+            self.subject_combo['values'] = subjects
+            if subjects:
+                self.subject_combo.current(0)
+                self.on_subject_selected(None) # Trigger update of second list
+        except Exception as e:
+            print(f"Error loading subjects: {e}")
+
+    def on_subject_selected(self, event):
+        """When a subject is picked, populate the second dropdown with sessions."""
+        subject = self.subject_var.get()
+        if not subject: return
         
-        port = self.get_selected_port()
-        if not port or "No devices" in port:
-            messagebox.showerror("Error", "Please select a valid Serial Port")
+        try:
+            log_dir = Path(__file__).resolve().parent / "logs" / subject
+            if not log_dir.exists():
+                self.session_combo['values'] = []
+                return
+
+            # Find session folders
+            sessions = [d.name for d in log_dir.iterdir() if d.is_dir() and d.name.startswith("session_")]
+            sessions.sort(reverse=True) # Newest first
+            
+            self.session_combo['values'] = sessions
+            if sessions:
+                self.session_combo.current(0)
+            else:
+                self.session_var.set("No sessions")
+        except Exception as e:
+            print(f"Error loading sessions: {e}")
+             
+    def view_session_plot(self):
+        subject = self.subject_var.get()
+        session_name = self.session_var.get()
+
+        if not subject or not session_name or session_name == "No sessions":
             return
-
-        # Prepare parameters
-        mm = self.mode_var.get() == "manual"
-        mb = self._parse_bpm(self.manual_bpm_var.get()) if mm else None
         
-        # Session Name
-        s_name = self.session_name_var.get().strip()
-        if not s_name: s_name = None # Let logger generate timestamp
+        # Construct path from both dropdowns
+        base_dir = Path(__file__).resolve().parent / "logs" / subject / session_name
+        plot_path = base_dir / "BPM_plot.png"
+        
+        if not plot_path.exists():
+            # If PNG missing, try generate it on demand
+            csv_path = base_dir / "session_data.csv"
+            if csv_path.exists():
+                try:
+                    from utils.plotter import generate_post_session_plot
+                    print(f"DEBUG: Generating plot for {base_dir}...")
+                    generate_post_session_plot(base_dir)
+                except Exception as e:
+                    print(f"DEBUG: Plot generation failed: {e}")
+                    import traceback
+                    traceback.print_exc()
+        
+        if not plot_path.exists():
+            messagebox.showinfo("No Plot", f"No plot found for {session_name}\n(Make sure the session finished correctly)")
+            return
+            
+        # Create Popup Window
+        top = tk.Toplevel(self.root)
+        top.title(f"Analysis: {subject} / {session_name}")
+        top.geometry("1100x850") # Fallback size
+        top.configure(bg=self.P["bg"])
+        
+        # Maximize window (Windows only)
+        try: top.state("zoomed")
+        except: pass
 
+        # Using Label with Dynamic Resizing (Requires Pillow)
         try:
-            raw_sw = self.step_window_var.get().strip()
-            sw = int(raw_sw) if raw_sw else 6 # Default 6 if empty
-            if sw < 1 or sw > 20: raise ValueError
-        except:
-            sw = 6 # Default fallback
-            self.step_window_var.set("")
+            from PIL import Image, ImageTk
+            
+            # Load original image
+            original_image = Image.open(plot_path)
+            
+            # Create a label to hold the image
+            lbl = ttk.Label(top, background=self.P["bg"])
+            lbl.pack(fill="both", expand=True)
+            
+            def resize_image(event):
+                # Calculate aspect ratio to fit window
+                new_width = event.width
+                new_height = event.height
+                
+                if new_width < 10 or new_height < 10: return
+                
+                # Resize (LANCZOS for quality)
+                resized = original_image.resize((new_width, new_height), Image.Resampling.LANCZOS)
+                photo = ImageTk.PhotoImage(resized)
+                
+                lbl.configure(image=photo)
+                lbl.image = photo # Keep reference
+                
+            # Bind resize event
+            lbl.bind("<Configure>", resize_image)
+            
+        except ImportError:
+            # Fallback to standard scrollbars if PIL not available (though it should be)
+            print("DEBUG: PIL not found, falling back to scrollbars")
+            container = ttk.Frame(top)
+            container.pack(fill="both", expand=True)
+            canvas = tk.Canvas(container, bg=self.P["bg"], highlightthickness=0)
+            hbar = ttk.Scrollbar(container, orient="horizontal", command=canvas.xview)
+            vbar = ttk.Scrollbar(container, orient="vertical", command=canvas.yview)
+            scrollable_frame = ttk.Frame(canvas, style="TFrame")
+            scrollable_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+            canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+            canvas.configure(xscrollcommand=hbar.set, yscrollcommand=vbar.set)
+            canvas.pack(side="left", fill="both", expand=True)
+            vbar.pack(side="right", fill="y")
+            hbar.pack(side="bottom", fill="x")
+            
+            try:
+                img = tk.PhotoImage(file=str(plot_path))
+                l = ttk.Label(scrollable_frame, image=img, background=self.P["bg"])
+                l.image = img
+                l.pack()
+            except Exception as e:
+                ttk.Label(scrollable_frame, text=f"Error: {e}").pack()
 
-        try:
-            raw_st = self.stride_var.get().strip()
-            st = int(raw_st) if raw_st else 1 # Default 1 if empty
-            if st < 1 or st > 20: raise ValueError
-        except:
-            st = 1
-            self.stride_var.set("")
 
-        # Create and start the Subprocess Manager
-        self.session_thread = SubprocessManager(str(p), port, mm, mb, sw, st, self.enqueue_status, self.enqueue_session_dir, self.enqueue_data, session_name=s_name)
-        
-        # Reset RAM Buffer
-        self.live_data_buffer = [] 
-        # self.session_thread.start() # No longer needed as init starts it
-        
-        # Update UI state
-        self.is_running = True
-        self.btn_start.configure(state="disabled"); self.btn_stop.configure(state="normal")
-        self._set_led(self.led_run, True, self.P["warning"]); self.log(f"Session running on {port}")
+
 
     def stop_session(self):
         """Action for the 'STOP SESSION' button."""
@@ -532,12 +769,7 @@ class GuiApp:
             except Exception as e:
                 self.log(f"Plot failed: {e}")
 
-    def apply_manual_bpm(self):
-        b = self._parse_bpm(self.manual_bpm_var.get())
-        if b:
-            if self.session_thread: self.session_thread.update_manual_bpm(b)
-            self.mode_var.set("manual"); self.log(f"Manual BPM: {b}")
-        else: messagebox.showerror("Error", "Invalid BPM")
+
 
     def apply_smoothing_up(self):
         try:
@@ -688,11 +920,10 @@ class GuiApp:
         # 1. Drain Queue into RAM Buffer
         while not self.data_queue.empty():
             self.live_data_buffer.append(self.data_queue.get_nowait())
-            
-        # SAFETY: Prevent infinite RAM growth. Limit to 1,000,000 points (~3 hours)
-        # This ensures the user sees the FULL session history live.
-        if len(self.live_data_buffer) > 1000000:
-            self.live_data_buffer = self.live_data_buffer[-1000000:]
+        
+        # SAFETY: trim to recent window to keep Tk/Matplotlib responsive
+        if len(self.live_data_buffer) > self.max_live_points:
+            self.live_data_buffer = self.live_data_buffer[-self.max_live_points:]
             
         if not self.live_data_buffer: return
 
@@ -701,6 +932,10 @@ class GuiApp:
             # We construct DataFrame from list of dicts (Very fast)
             # Keys: t, s, w, e
             df = pd.DataFrame(self.live_data_buffer)
+
+            # Keep only the most recent window before plotting to reduce draw cost
+            if len(df) > self.max_live_points:
+                df = df.tail(self.max_live_points).reset_index(drop=True)
             
             # Rename match plotter expectations
             # Packet keys: t=time_str, s=song, w=walking, e=event
@@ -723,9 +958,16 @@ class GuiApp:
         self.plotter.update(df)
         self.figure.tight_layout(); self.canvas.draw_idle()
 
+    def update_plot_options(self):
+        """Callback for the 2x/0.5x BPM checkboxes."""
+        self.plotter.set_show_multipliers(self.show_2x_var.get(), self.show_half_var.get())
+        # Force immediate refresh of current view if data exists
+        if self.live_data_buffer:
+            self.refresh_plot()
+
     @staticmethod
     def _parse_bpm(v):
-        try: return float(v) if float(v)>0 else None
+        try: return float(v) if float(v) >= 0 else None
         except: return None
 
     def _bind_placeholder(self, entry, text_var, placeholder):
