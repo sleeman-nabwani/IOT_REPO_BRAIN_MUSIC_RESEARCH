@@ -15,6 +15,9 @@ import time
 import serial
 import argparse
 import threading
+import os
+import json
+import traceback
 from utils.midi_player import MidiBeatSync
 from utils.logger import Logger
 from utils.BPM_estimation import BPM_estimation
@@ -22,6 +25,25 @@ from utils.comms import session_handshake, handle_engine_command, handle_step
 from utils.main_helper_functions import retrain_prediction_model
 from utils.LGBM_predictor import LGBMPredictor
 # from utils.safety import safe_execute
+
+# region agent log
+_DEBUG_LOG_PATH = r"c:\Users\sleem\Desktop\Technion\semester_9\IOT\IOT_REPO_BRAIN_MUSIC_RESEARCH\.cursor\debug.log"
+def _dbg(runId: str, hypothesisId: str, location: str, message: str, data: dict | None = None):
+    payload = {
+        "sessionId": "debug-session",
+        "runId": runId,
+        "hypothesisId": hypothesisId,
+        "location": location,
+        "message": message,
+        "data": data or {},
+        "timestamp": int(time.time() * 1000),
+    }
+    try:
+        with open(_DEBUG_LOG_PATH, "a", encoding="utf-8") as f:
+            f.write(json.dumps(payload, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+# endregion
 
 #parse the arguments
 def parse_args() -> argparse.Namespace:
@@ -93,6 +115,16 @@ def start_stdin_listener(command_queue):
 
 def main(args, status_callback=print, stop_event=None, session_dir_callback=None, command_queue=None):
     midi_path = args.midi_path
+    # region agent log
+    run_id = os.getenv("DBG_RUN_ID") or f"engine_{int(time.time() * 1000)}"
+    _dbg(
+        run_id,
+        "M",
+        "server/main.py:main",
+        "Engine starting",
+        {"midi_path": midi_path, "serial_port": getattr(args, "serial_port", None), "manual": bool(getattr(args, "manual", False))},
+    )
+    # endregion
     
     # 1. Initialize Logger 
     logger = Logger(gui_callback=status_callback, session_name=getattr(args, 'session_name', None))
@@ -101,6 +133,9 @@ def main(args, status_callback=print, stop_event=None, session_dir_callback=None
     # The GUI listens for "SESSION_DIR:..." to know where to save the plot.
     print(f"SESSION_DIR:{logger.path}")
     sys.stdout.flush() # Ensure it sends immediately
+    # region agent log
+    _dbg(run_id, "M", "server/main.py:main", "SESSION_DIR printed", {"path": str(logger.path)})
+    # endregion
     
 
 
@@ -162,8 +197,14 @@ def main(args, status_callback=print, stop_event=None, session_dir_callback=None
     try:
         ser = serial.Serial(port, 115200, timeout=0.2)
         logger.log(f"DEBUG: Serial port {port} opened successfully.")
+        # region agent log
+        _dbg(run_id, "S", "server/main.py:main", "Serial opened", {"port": port, "timeout": ser.timeout})
+        # endregion
     except Exception as e:
         logger.log(f"Failed to open serial port {port}: {e}")
+        # region agent log
+        _dbg(run_id, "S", "server/main.py:main", "Serial open failed", {"port": port, "error": repr(e), "traceback": traceback.format_exc()[-1500:]})
+        # endregion
         return player, logger, bpm_estimation
 
     # Config from arguments
@@ -172,7 +213,14 @@ def main(args, status_callback=print, stop_event=None, session_dir_callback=None
 
     if not session_handshake(ser, logger, smoothing_window=smoothing_window, stride=stride):
         logger.log("Handshake failed; aborting session")
+        # region agent log
+        _dbg(run_id, "S", "server/main.py:main", "Handshake failed", {})
+        # endregion
         return player, logger, bpm_estimation
+
+    # region agent log
+    _dbg(run_id, "S", "server/main.py:main", "Handshake completed", {"smoothing_window": smoothing_window, "stride": stride})
+    # endregion
 
     # runtime serial reads should be non-blocking to avoid slowing playback
     ser.timeout = 0
@@ -180,6 +228,14 @@ def main(args, status_callback=print, stop_event=None, session_dir_callback=None
     # start playback after handshake (threaded player handles timing)
     player.start()
     logger.log("Running main loop...")
+
+    # region agent log
+    def _hb():
+        for i in range(6):  # 12 seconds
+            _dbg(run_id, "H", "server/main.py:heartbeat", "Engine heartbeat", {"i": i})
+            time.sleep(2)
+    threading.Thread(target=_hb, daemon=True).start()
+    # endregion
     
     # ------------------------------------------------------------------
     # STDIN LISTENER (For Subprocess Mode)
@@ -195,6 +251,16 @@ def main(args, status_callback=print, stop_event=None, session_dir_callback=None
     # ==================================================================================
     # MAIN LOOP
     # ==================================================================================
+    # region agent log
+    loop_last_log = time.time()
+    loops = 0
+    empty_reads = 0
+    parse_fail = 0
+    steps_ok = 0
+    last_nonempty_ts = time.time()
+    first_steps_logged = 0
+    first_fail_logged = 0
+    # endregion
     while True:
         # CHECK STOP EVENT
         if stop_event and stop_event.is_set():
@@ -218,20 +284,77 @@ def main(args, status_callback=print, stop_event=None, session_dir_callback=None
         # read the step from the serial port
         raw_line = ser.readline()
         if not raw_line:
+            # region agent log
+            empty_reads += 1
+            loops += 1
+            # endregion
             continue
+
+        # region agent log
+        loops += 1
+        last_nonempty_ts = time.time()
+        # endregion
         # handle the step
         try:
             bpm, instant_bpm, current_ts = handle_step(raw_line, player.walkingBPM)
         except ValueError:
+            # region agent log
+            parse_fail += 1
+            if first_fail_logged < 3:
+                first_fail_logged += 1
+                _dbg(
+                    run_id,
+                    "S",
+                    "server/main.py:main",
+                    "handle_step parse failed",
+                    {"n": first_fail_logged, "raw": raw_line[:200].decode("utf-8", errors="ignore")},
+                )
+            # endregion
             continue
         
         #register the step and log the data
         bpm_estimation.register_step(bpm)    
         logger.log_data(current_ts, player.walkingBPM, bpm, step_event=True)
         logger.log(f"Processed: BPM={bpm}")
+
+        # region agent log
+        steps_ok += 1
+        if first_steps_logged < 3:
+            first_steps_logged += 1
+            _dbg(
+                run_id,
+                "S",
+                "server/main.py:main",
+                "Step processed",
+                {"n": first_steps_logged, "bpm": bpm, "instant_bpm": instant_bpm, "song_bpm": player.walkingBPM},
+            )
+        # endregion
         
         # CPU Yield (Prevent 100% core usage)
         time.sleep(0.001)
+
+        # region agent log
+        now = time.time()
+        if now - loop_last_log >= 1.0 and now - (loop_last_log) < 10.0 + 1.0:
+            _dbg(
+                run_id,
+                "S",
+                "server/main.py:main",
+                "Loop stats (1s)",
+                {
+                    "loops": loops,
+                    "empty_reads": empty_reads,
+                    "parse_fail": parse_fail,
+                    "steps_ok": steps_ok,
+                    "since_nonempty_s": now - last_nonempty_ts,
+                },
+            )
+            loops = 0
+            empty_reads = 0
+            parse_fail = 0
+            steps_ok = 0
+            loop_last_log = now
+        # endregion
         
     logger.log("Session ended")
     player.stop()

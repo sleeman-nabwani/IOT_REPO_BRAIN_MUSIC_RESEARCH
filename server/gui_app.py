@@ -3,6 +3,9 @@ from queue import SimpleQueue
 from pathlib import Path
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
+import time
+import json
+import traceback
 
 
 import pandas as pd
@@ -23,6 +26,25 @@ try:
     SERIAL_AVAILABLE = True
 except ImportError:
     SERIAL_AVAILABLE = False
+
+# region agent log
+_DEBUG_LOG_PATH = r"c:\Users\sleem\Desktop\Technion\semester_9\IOT\IOT_REPO_BRAIN_MUSIC_RESEARCH\.cursor\debug.log"
+def _dbg(runId: str, hypothesisId: str, location: str, message: str, data: dict | None = None):
+    payload = {
+        "sessionId": "debug-session",
+        "runId": runId,
+        "hypothesisId": hypothesisId,
+        "location": location,
+        "message": message,
+        "data": data or {},
+        "timestamp": int(time.time() * 1000),
+    }
+    try:
+        with open(_DEBUG_LOG_PATH, "a", encoding="utf-8") as f:
+            f.write(json.dumps(payload, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+# endregion
 
 # ==================================================================================
 # GUI APPLICATION
@@ -95,8 +117,13 @@ class GuiApp:
         self.data_queue = SimpleQueue()
         self.current_session_dir = None
         self.live_data_buffer = []
-        # Limit how many recent points are kept/rendered to avoid UI lag
-        self.max_live_points = 2000  # smaller window for smoother Tk/Matplotlib
+        # Limit how many points we render per frame (buffer keeps full history)
+        self.max_live_points = 2500
+        # Sliding window controls
+        self.view_window_sec = 240  # visible time window for live plot
+        self.buffer_cap = 30000     # absolute cap to avoid unbounded growth
+        # Live plot uses subplots_adjust; avoid tight_layout in the hot path for FPS stability.
+        self._did_tight_layout = True
         self.is_running = False
         self.is_app_active = True
         
@@ -105,6 +132,17 @@ class GuiApp:
         self.job_dir = None
         self.job_plot = None
         self.job_ports = None
+        
+        self.port_scan_thread = None
+
+        # region agent log
+        self._dbg_run_id = f"run_{int(time.time() * 1000)}"
+        self._dbg_data_seen = 0
+        self._dbg_slow_plot_count = 0
+        self._dbg_exception_count = 0
+        self._dbg_slow_status_count = 0
+        self._dbg_first_step_logged = False
+        # endregion
 
 
 
@@ -347,6 +385,7 @@ class GuiApp:
         
         # Initialize Plotter Logic
         self.plotter = LivePlotter(self.ax1, self.P)
+        self.plotter.view_window_sec = self.view_window_sec
         # Initial style application (empty)
         self.plotter.update(pd.DataFrame({"seconds": [], "walking_bpm": [], "song_bpm": [], "step_event": []}))
 
@@ -451,13 +490,26 @@ class GuiApp:
     def start_session(self):
         """Action for the 'START SESSION' button."""
         if self.is_running: return
+
+        # region agent log
+        self._dbg_run_id = f"run_{int(time.time() * 1000)}"
+        self._dbg_data_seen = 0
+        self._dbg_slow_plot_count = 0
+        self._dbg_exception_count = 0
+        self._dbg_slow_status_count = 0
+        self._dbg_first_step_logged = False
+        # endregion
         
         # Clear any leftover live data/plot from previous session
         self.live_data_buffer = []
         while not self.data_queue.empty():
             self.data_queue.get_nowait()
         self.plotter.reset()
-        self.canvas.draw_idle()
+        # Pre-warm renderer so the first incoming packets do not pay the initial draw cost.
+        try:
+            self.canvas.draw()
+        except Exception:
+            self.canvas.draw_idle()
         
         # Resolve MIDI Path (Dropdown Name -> Full Path)
         m_name = self.midi_var.get()
@@ -507,12 +559,35 @@ class GuiApp:
             if val: ad = float(val)
         except: pass
 
+        # region agent log
+        try:
+            self._dbg_data_seen = 0
+            _dbg(
+                self._dbg_run_id,
+                "C",
+                "server/gui_app.py:start_session",
+                "Starting session",
+                {"port": port, "manual": mm, "manual_bpm": mb, "window": sw, "stride": st, "session_name": s_name},
+            )
+        except Exception:
+            pass
+        # endregion
+
         # Create and start the Subprocess Manager
-        self.session_thread = SubprocessManager(str(p), port, mm, mb, sw, st, self.enqueue_status, self.enqueue_session_dir, self.enqueue_data, session_name=s_name, alpha_up=au, alpha_down=ad)
-        
-        # Reset RAM Buffer
-        self.live_data_buffer = [] 
-        # self.session_thread.start() # No longer needed as init starts it
+        self.session_thread = SubprocessManager(
+            str(p),
+            port,
+            mm,
+            mb,
+            sw,
+            st,
+            self.enqueue_status,
+            self.enqueue_session_dir,
+            self.enqueue_data,
+            session_name=s_name,
+            alpha_up=au,
+            alpha_down=ad,
+        )
         
         # Update UI state
         self.is_running = True
@@ -769,6 +844,16 @@ class GuiApp:
             except Exception as e:
                 self.log(f"Plot failed: {e}")
 
+        # Reset live buffers and plot for next session
+        # self.live_data_buffer = [] # Retain buffer so user can see last session
+        # if self.plotter:
+        #    self.plotter.reset()
+        #    self._did_tight_layout = False
+        try:
+            self.canvas.draw_idle()
+        except Exception:
+            pass
+
 
 
     def apply_smoothing_up(self):
@@ -863,13 +948,64 @@ class GuiApp:
     # Tkinter isn't thread-safe, so we check Queues for messages from the background thread.
     
     def enqueue_status(self, m): self.status_queue.put(m)
-    def enqueue_session_dir(self, p): self.session_dir_queue.put(p)
-    def enqueue_data(self, d): self.data_queue.put(d)
+    def enqueue_session_dir(self, p):
+        self.session_dir_queue.put(p)
+        # region agent log
+        try:
+            _dbg(self._dbg_run_id, "B", "server/gui_app.py:enqueue_session_dir", "SESSION_DIR received", {"path": str(p)})
+        except Exception:
+            pass
+        # endregion
+    def enqueue_data(self, d):
+        self.data_queue.put(d)
+        # region agent log
+        try:
+            self._dbg_data_seen += 1
+            if self._dbg_data_seen <= 3:
+                _dbg(
+                    self._dbg_run_id,
+                    "A",
+                    "server/gui_app.py:enqueue_data",
+                    "First DATA_PACKET received",
+                    {"n": self._dbg_data_seen, "t": d.get("t"), "s": d.get("s"), "w": d.get("w"), "e": d.get("e")},
+                )
+            if (not self._dbg_first_step_logged) and bool(d.get("e")):
+                self._dbg_first_step_logged = True
+                _dbg(
+                    self._dbg_run_id,
+                    "A",
+                    "server/gui_app.py:enqueue_data",
+                    "First STEP packet received",
+                    {"t": d.get("t"), "s": d.get("s"), "w": d.get("w"), "e": d.get("e")},
+                )
+        except Exception:
+            pass
+        # endregion
     
     def poll_status(self):
         """Checks for new status messages every 200ms."""
         if not self.is_app_active: return
-        while not self.status_queue.empty(): self.log(self.status_queue.get_nowait())
+        # region agent log
+        t0 = time.perf_counter()
+        count = 0
+        # endregion
+
+        while not self.status_queue.empty():
+            self.log(self.status_queue.get_nowait())
+            count += 1
+
+        # region agent log
+        dt_ms = (time.perf_counter() - t0) * 1000
+        if (count > 30 or dt_ms > 40) and self._dbg_slow_status_count < 10:
+            self._dbg_slow_status_count += 1
+            _dbg(
+                self._dbg_run_id,
+                "E",
+                "server/gui_app.py:poll_status",
+                "Heavy status processing",
+                {"count": count, "dt_ms": dt_ms},
+            )
+        # endregion
         self.job_status = self.root.after(200, self.poll_status)
         
     def poll_session_dir(self):
@@ -881,17 +1017,35 @@ class GuiApp:
         self.job_dir = self.root.after(500, self.poll_session_dir)
         
     def poll_plot(self):
-        """Updates the graph every 100ms."""
+        """Updates the graph every 50ms (20 FPS)."""
         if not self.is_app_active: return
+        
         if self.current_session_dir: self.refresh_plot()
-        self.job_plot = self.root.after(100, self.poll_plot)
+        
+        self.job_plot = self.root.after(50, self.poll_plot)
 
     def poll_ports(self):
-        """Checks for new serial ports every 2 seconds."""
+        """Checks for new serial ports every 2 seconds (THREADED)."""
         if not SERIAL_AVAILABLE: return
+        
+        # Avoid overlapping scans
+        if self.port_scan_thread and self.port_scan_thread.is_alive():
+            self.job_ports = self.root.after(2000, self.poll_ports)
+            return
+
+        self.port_scan_thread = threading.Thread(target=self._scan_ports_background, daemon=True)
+        self.port_scan_thread.start()
+        self.job_ports = self.root.after(2000, self.poll_ports)
+
+    def _scan_ports_background(self):
+        try:
+            ports = serial.tools.list_ports.comports()
+            self.root.after(0, lambda: self._update_ports_ui(ports))
+        except: pass
+
+    def _update_ports_ui(self, ports):
         try:
             current_selection = self.port_var.get()
-            ports = serial.tools.list_ports.comports()
             new_values = [f"{p.device} - {p.description}" for p in ports]
             
             # Update only if changed to avoid UI flicker
@@ -905,37 +1059,38 @@ class GuiApp:
                     if "No devices" in current_selection or current_selection == "":
                          self.port_combo.current(0)
                     else:
-                        # Keep showing the old name (e.g. COM3) even if disconnected?
-                        # Or switch to first available? Let's switch to first available.
                         self.port_combo.current(0)
-                        
-        except Exception: 
-            pass
-        self.job_ports = self.root.after(2000, self.poll_ports)
+        except: pass
 
     def refresh_plot(self):
         """
         Reads from RAM Buffer (Fast!) instead of Disk CSV.
         """
-        # 1. Drain Queue into RAM Buffer
-        while not self.data_queue.empty():
-            self.live_data_buffer.append(self.data_queue.get_nowait())
-        
-        # SAFETY: trim to recent window to keep Tk/Matplotlib responsive
-        if len(self.live_data_buffer) > self.max_live_points:
-            self.live_data_buffer = self.live_data_buffer[-self.max_live_points:]
-            
-        if not self.live_data_buffer: return
+        # region agent log
+        t0 = time.perf_counter()
+        stage = "drain"
+        df = None
+        # endregion
 
-        # 2. Convert to DataFrame
+        new_data_count = 0
         try:
-            # We construct DataFrame from list of dicts (Very fast)
-            # Keys: t, s, w, e
-            df = pd.DataFrame(self.live_data_buffer)
+            # 1. Drain Queue into RAM Buffer
+            while not self.data_queue.empty():
+                self.live_data_buffer.append(self.data_queue.get_nowait())
+                new_data_count += 1
+            
+            # Hard cap to prevent unbounded growth
+            stage = "cap"
+            if len(self.live_data_buffer) > self.buffer_cap:
+                self.live_data_buffer = self.live_data_buffer[-self.buffer_cap:]
+                
+            if not self.live_data_buffer or new_data_count == 0:
+                return
 
-            # Keep only the most recent window before plotting to reduce draw cost
-            if len(df) > self.max_live_points:
-                df = df.tail(self.max_live_points).reset_index(drop=True)
+            # 2. Convert to DataFrame (OPTIMIZED: Only process the tail!)
+            stage = "dataframe"
+            points_to_process = self.live_data_buffer[-8000:]
+            df = pd.DataFrame(points_to_process)
             
             # Rename match plotter expectations
             # Packet keys: t=time_str, s=song, w=walking, e=event
@@ -951,12 +1106,96 @@ class GuiApp:
                  # It comes as boolean from JSON, but just in case
                  df["step_event"] = df["step_event"].astype(bool)
 
-        except Exception: 
+            # Early exit if conversion failed
+            if df.empty:
+                return
+
+            # Sliding time window: keep only recent seconds
+            stage = "window"
+            tmax = df["seconds"].max()
+            if pd.isna(tmax):
+                return
+
+            window_start = tmax - self.view_window_sec
+            keep_mask = df["seconds"] >= window_start
+            if not keep_mask.all():
+                df = df[keep_mask].reset_index(drop=True)
+                
+            # Downsample for rendering only (keep full buffer for history/export)
+            stage = "downsample"
+            if len(df) > self.max_live_points:
+                step = max(1, len(df) // self.max_live_points)
+                df_full = df
+                df = df.iloc[::step].reset_index(drop=True)
+                # Guarantee we keep the latest point for axis limits
+                if not df.empty and not df_full.empty:
+                    if df.iloc[-1]["seconds"] != df_full.iloc[-1]["seconds"]:
+                        df = pd.concat([df, df_full.iloc[[-1]]], ignore_index=True)
+            
+            # Delegate to Plotter
+            stage = "plotter_update"
+            self.plotter.update(df)
+            
+            stage = "layout"
+            if not self._did_tight_layout:
+                try:
+                    self.figure.tight_layout()
+                    self._did_tight_layout = True
+                except: 
+                    pass
+            
+            stage = "draw"
+            try:
+                self.canvas.draw_idle()
+            except Exception:
+                pass
+
+        except Exception as e:
+            # region agent log
+            try:
+                if self._dbg_exception_count < 10:
+                    self._dbg_exception_count += 1
+                    _dbg(
+                        self._dbg_run_id,
+                        "A",
+                        "server/gui_app.py:refresh_plot",
+                        "Exception in refresh_plot",
+                        {
+                            "stage": stage,
+                            "error": repr(e),
+                            "traceback": traceback.format_exc()[-1500:],
+                            "new_data_count": new_data_count,
+                            "buf_len": len(self.live_data_buffer),
+                            "df_len": (len(df) if df is not None else None),
+                        },
+                    )
+            except Exception:
+                pass
+            # endregion
+            print(f"Plot Error ({stage}): {e}")
             return
-        
-        # Delegate to Plotter
-        self.plotter.update(df)
-        self.figure.tight_layout(); self.canvas.draw_idle()
+        finally:
+            # region agent log
+            try:
+                dt_ms = (time.perf_counter() - t0) * 1000
+                if dt_ms > 60 and self._dbg_slow_plot_count < 10:
+                    self._dbg_slow_plot_count += 1
+                    _dbg(
+                        self._dbg_run_id,
+                        "D",
+                        "server/gui_app.py:refresh_plot",
+                        "Slow refresh_plot frame",
+                        {
+                            "dt_ms": dt_ms,
+                            "stage": stage,
+                            "new_data_count": new_data_count,
+                            "buf_len": len(self.live_data_buffer),
+                            "df_len": (len(df) if df is not None else None),
+                        },
+                    )
+            except Exception:
+                pass
+            # endregion
 
     def update_plot_options(self):
         """Callback for the 2x/0.5x BPM checkboxes."""

@@ -2,8 +2,29 @@ import subprocess
 import sys
 import threading
 import json
+import time
+import traceback
 from pathlib import Path
 import os
+
+# region agent log
+_DEBUG_LOG_PATH = r"c:\Users\sleem\Desktop\Technion\semester_9\IOT\IOT_REPO_BRAIN_MUSIC_RESEARCH\.cursor\debug.log"
+def _dbg(runId: str, hypothesisId: str, location: str, message: str, data: dict | None = None):
+    payload = {
+        "sessionId": "debug-session",
+        "runId": runId,
+        "hypothesisId": hypothesisId,
+        "location": location,
+        "message": message,
+        "data": data or {},
+        "timestamp": int(time.time() * 1000),
+    }
+    try:
+        with open(_DEBUG_LOG_PATH, "a", encoding="utf-8") as f:
+            f.write(json.dumps(payload, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+# endregion
 
 class SubprocessManager:
     """
@@ -18,6 +39,12 @@ class SubprocessManager:
         self.data_callback = data_callback
         self.process = None
         self.running = False
+
+        # region agent log
+        self._dbg_run_id = f"pm_{int(time.time() * 1000)}"
+        self._dbg_data_seen = 0
+        self._dbg_stderr_seen = 0
+        # endregion
         
         # Build Command Arguments
         # Use absolute path to ensure main.py is found regardless of CWD
@@ -46,6 +73,8 @@ class SubprocessManager:
         
         # Launch Process
         try:
+            env = os.environ.copy()
+            env["DBG_RUN_ID"] = self._dbg_run_id
             # We use bufsize=1 for line buffering
             self.process = subprocess.Popen(
                 cmd,
@@ -54,9 +83,14 @@ class SubprocessManager:
                 stderr=subprocess.PIPE, # Capture separately
                 text=True,
                 bufsize=1,
-                cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))) # Execute INSIDE server/ folder (parent of utils)
+                cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))), # Execute INSIDE server/ folder (parent of utils)
+                env=env,
             )
             self.running = True
+
+            # region agent log
+            _dbg(self._dbg_run_id, "P", "server/utils/process_manager.py:__init__", "Engine process started", {"pid": self.process.pid, "cmd": cmd})
+            # endregion
             
             # Start Background Reader Threads
             self.reader_thread = threading.Thread(target=self._read_stdout, daemon=True)
@@ -67,6 +101,9 @@ class SubprocessManager:
             
         except Exception as e:
             self._log(f"Failed to start engine: {e}")
+            # region agent log
+            _dbg(self._dbg_run_id, "P", "server/utils/process_manager.py:__init__", "Failed to start engine", {"error": repr(e), "traceback": traceback.format_exc()[-1500:]})
+            # endregion
 
         # Debug logging of command (disabled for clean production)
         # self._log(f"Executing: {' '.join(cmd)}")
@@ -84,6 +121,14 @@ class SubprocessManager:
                 line = line.strip()
                 if line:
                     self._log(f"[Stderr] {line}")
+                    # region agent log
+                    try:
+                        self._dbg_stderr_seen += 1
+                        if self._dbg_stderr_seen <= 5:
+                            _dbg(self._dbg_run_id, "P", "server/utils/process_manager.py:_read_stderr", "stderr line", {"n": self._dbg_stderr_seen, "line": line[:500]})
+                    except Exception:
+                        pass
+                    # endregion
             except Exception:
                 break
 
@@ -92,7 +137,19 @@ class SubprocessManager:
         while self.running and self.process:
             try:
                 line = self.process.stdout.readline()
-                if not line: break
+                if not line:
+                    # region agent log
+                    try:
+                        rc = None
+                        try:
+                            rc = self.process.poll()
+                        except Exception:
+                            rc = None
+                        _dbg(self._dbg_run_id, "P", "server/utils/process_manager.py:_read_stdout", "stdout EOF", {"returncode": rc})
+                    except Exception:
+                        pass
+                    # endregion
+                    break
                 line = line.strip()
                 
                 # Check for special signals
@@ -100,6 +157,9 @@ class SubprocessManager:
                      path_str = line.split(":", 1)[1]
                      if self.session_dir_callback:
                          self.session_dir_callback(Path(path_str))
+                     # region agent log
+                     _dbg(self._dbg_run_id, "P", "server/utils/process_manager.py:_read_stdout", "SESSION_DIR line", {"path": path_str})
+                     # endregion
                      continue # Don't log this protocol line
                 
                 # Check for Data Packet (RAM Pipe)
@@ -109,11 +169,22 @@ class SubprocessManager:
                              json_str = line.split(":", 1)[1]
                              data = json.loads(json_str)
                              self.data_callback(data)
+                             # region agent log
+                             try:
+                                 self._dbg_data_seen += 1
+                                 if self._dbg_data_seen <= 3:
+                                     _dbg(self._dbg_run_id, "P", "server/utils/process_manager.py:_read_stdout", "DATA_PACKET parsed", {"n": self._dbg_data_seen, "t": data.get("t"), "e": data.get("e")})
+                             except Exception:
+                                 pass
+                             # endregion
                          except: pass
                      continue
 
                 if line == "EXIT_CLEAN":
                     self.running = False
+                    # region agent log
+                    _dbg(self._dbg_run_id, "P", "server/utils/process_manager.py:_read_stdout", "EXIT_CLEAN received", {})
+                    # endregion
                     break
 
                 self._log(f"[Engine] {line}")

@@ -1,5 +1,6 @@
 import pandas as pd
 import matplotlib.pyplot as plt
+import numpy as np
 from pathlib import Path
 from sys import exit
 
@@ -247,6 +248,9 @@ class LivePlotter:
         self.show_double = False
         self.show_half = False
         self.hold_seconds = 6  # unused now; retained for tuning if needed
+        self.max_render_points = 3500  # downsample target to keep UI smooth
+        self.max_scatter_points = 1800
+        self.view_window_sec = 240  # sliding window span for live view
 
         # Track maximum X value seen to prevent graph from shrinking/resetting
         self.max_x_seen = 10  # Start with 10 seconds as minimum view
@@ -331,21 +335,17 @@ class LivePlotter:
         w = w[valid_mask].reset_index(drop=True)
         s = s[valid_mask].reset_index(drop=True)
         step_events = step_events[valid_mask].reset_index(drop=True)
-
-        # Keep only a recent window to reduce draw cost
-        if len(t) > 0:
-            recent_mask = t >= (t.max() - 180)  # last 3 minutes
-            t = t[recent_mask].reset_index(drop=True)
-            w = w[recent_mask].reset_index(drop=True)
-            s = s[recent_mask].reset_index(drop=True)
-            step_events = step_events[recent_mask].reset_index(drop=True)
-
-            # Re-base time to start at zero for the visible window
-            t0 = t.min()
-            t = t - t0
         
         if len(t) == 0:
             return
+        
+        # Downsample to keep draw calls light while keeping the full session span
+        if len(t) > self.max_render_points:
+            idx = pd.Index(np.linspace(0, len(t) - 1, self.max_render_points, dtype=int))
+            t = t.iloc[idx].reset_index(drop=True)
+            w = w.iloc[idx].reset_index(drop=True)
+            s = s.iloc[idx].reset_index(drop=True)
+            step_events = step_events.iloc[idx].reset_index(drop=True)
         
         # Song BPM: allow it to show even before steps, fill gaps
         s = s.ffill().bfill()
@@ -374,18 +374,18 @@ class LivePlotter:
             self.line_half, = self.ax1.plot([], [], color="#ec4899", lw=1.5, ls=":", label="0.5x Song", alpha=0.7)
             
             self.ax1.legend(facecolor=self.P["card_bg"], labelcolor="white", frameon=False, fontsize=8, loc="upper left")
+            
+            # Initialize scatter once; we will update offsets for performance
+            self.scat_steps = self.ax1.scatter([], [], color="#f59e0b", s=12, zorder=5)
         else:
             # Lines will be updated after scatter so points appear first
             pass
             
-        # X-axis: Only expand, never shrink (prevents resetting)
-        # Track the maximum X value we've ever seen
+        # X-axis: sliding window based on view_window_sec
         current_max = t.max() if len(t) > 0 else 0
-        if current_max > self.max_x_seen:
-            self.max_x_seen = current_max
-        
-        # Always set xlim from 0 to max + buffer
-        self.ax1.set_xlim(0, self.max_x_seen + 5)
+        self.max_x_seen = current_max
+        x_min = max(0, current_max - getattr(self, "view_window_sec", 240))
+        self.ax1.set_xlim(x_min, current_max + 5)
         
         # Calculate multiples
         s_double = s * 2
@@ -407,21 +407,26 @@ class LivePlotter:
 
         # Scatter points (Footsteps) - with safety guards and recent-window limit
         try:
-            if self.scat_steps is not None:
-                self.scat_steps.remove()
-                self.scat_steps = None
-        except Exception:
-            self.scat_steps = None
-            
-        try:
             if step_events.any():
-                # Only plot recent points to reduce draw load
-                recent_mask = t >= (t.max() - 120)  # last 2 minutes
-                step_mask = step_events & recent_mask
+                step_mask = step_events.fillna(False)
                 step_t = t[step_mask]
                 step_w = w[step_mask]
-                if len(step_t) > 0:
-                    self.scat_steps = self.ax1.scatter(step_t, step_w, color="#f59e0b", s=12, zorder=5)
+                
+                # Downsample footsteps to keep draw time predictable
+                if len(step_t) > self.max_scatter_points:
+                    idx = pd.Index(np.linspace(0, len(step_t) - 1, self.max_scatter_points, dtype=int))
+                    step_t = step_t.iloc[idx].reset_index(drop=True)
+                    step_w = step_w.iloc[idx].reset_index(drop=True)
+                
+                offsets = np.column_stack((step_t.to_numpy(), step_w.to_numpy()))
+            else:
+                offsets = np.empty((0, 2))
+
+            if self.scat_steps is not None:
+                self.scat_steps.set_offsets(offsets)
+            else:
+                self.scat_steps = self.ax1.scatter([], [], color="#f59e0b", s=12, zorder=5)
+                self.scat_steps.set_offsets(offsets)
         except Exception:
             pass  # Silently ignore scatter errors to prevent crashes
 
