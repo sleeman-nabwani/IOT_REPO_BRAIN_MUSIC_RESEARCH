@@ -1,11 +1,11 @@
 import time
 from .midi_player import MidiBeatSync
 from .logger import Logger
-from .KNN_predictor import KNNPredictor
+from .LGBM_predictor import LGBMPredictor
 
 class BPM_estimation:
     def __init__(self, player: MidiBeatSync, logger: Logger, manual_mode: bool = False,
-                manual_bpm: float = None, knn_predictor: KNNPredictor = None) -> None:
+                manual_bpm: float = None, knn_predictor: LGBMPredictor = None) -> None:
         self.last_msg_time = time.time()
         self.player = player
         self.logger = logger
@@ -63,13 +63,13 @@ class BPM_estimation:
         self.last_msg_time = time.time() # Reset the decay timer
         self.step_count += 1
         
-        #KNN Predictor:
+        # Prediction model (currently LightGBM predictor)
         if self.knn_predictor:
             self.knn_predictor.add_step(new_bpm)
             predicted_bpm = self.knn_predictor.predict_next()
-            print(f"Predicted BPM: {predicted_bpm}#####################################")
+            print(f"[Prediction] Next BPM: {predicted_bpm}")
             if predicted_bpm is not None:
-                self.target_bpm = predicted_bpm
+                self.target_bpm = predicted_bpm*0.7 + new_bpm*0.3
 
 
     def update_recorded_values(self,last_msg_time: float, last_recorded_bpm: float):

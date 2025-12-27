@@ -19,8 +19,8 @@ from utils.midi_player import MidiBeatSync
 from utils.logger import Logger
 from utils.BPM_estimation import BPM_estimation
 from utils.comms import session_handshake, handle_engine_command, handle_step
-from utils.main_helper_functions import retrain_knn_model
-from utils.KNN_predictor import KNNPredictor
+from utils.main_helper_functions import retrain_prediction_model
+from utils.LGBM_predictor import LGBMPredictor
 # from utils.safety import safe_execute
 
 #parse the arguments
@@ -68,19 +68,11 @@ def parse_args() -> argparse.Namespace:
         help="Serial port for the ESP32 (default: COM6)",
     )
     parser.add_argument(
+        "--disable-prediction-model",
         "--disable-knn",
+        dest="disable_prediction",
         action="store_true",
-        help="Disable KNN prediction for this run",
-    )
-    parser.add_argument(
-        "--alpha-up",
-        type=float,
-        help="Set the climbing (attack) smoothing factor",
-    )
-    parser.add_argument(
-        "--alpha-down",
-        type=float,
-        help="Set the cascading (decay) smoothing factor",
+        help="Disable prediction model for this run",
     )
     return parser.parse_args()
 
@@ -139,22 +131,22 @@ def main(args, status_callback=print, stop_event=None, session_dir_callback=None
     else:
         logger.log("Starting in DYNAMIC MODE")
     
-    # 4. Initialize KNN Predictor
-    if args.disable_knn:
-        knn_predictor = None
-        logger.log("KNN prediction disabled")
+    # 4. Initialize prediction model (currently KNN predictor)
+    if args.disable_prediction:
+        prediction_model = None
+        logger.log("Prediction model disabled")
     else:
-        knn_predictor = KNNPredictor()
-        logger.log("KNN prediction enabled")
+        prediction_model = LGBMPredictor()
+        logger.log("Prediction model enabled (LightGBM)")
     
     # 5. Initialize BPM Estimation
-    bpm_estimation = BPM_estimation(player, logger, manual_mode=args.manual, manual_bpm=args.bpm, knn_predictor=knn_predictor)
-    
-    if args.alpha_up:
-        bpm_estimation.set_smoothing_alpha_up(args.alpha_up)
-    if args.alpha_down:
-        bpm_estimation.set_smoothing_alpha_down(args.alpha_down)
-        
+    bpm_estimation = BPM_estimation(
+        player,
+        logger,
+        manual_mode=args.manual,
+        manual_bpm=args.bpm,
+        knn_predictor=prediction_model,
+    )
     logger.log("Session started")
     
     # 6. Open Serial Port
@@ -241,8 +233,8 @@ def main(args, status_callback=print, stop_event=None, session_dir_callback=None
     player.close()
     if ser: ser.close()
     
-    # Auto-retrain KNN model with new session data
-    retrain_knn_model()
+    # Auto-retrain prediction model with new session data
+    retrain_prediction_model()
     
     print("EXIT_CLEAN")
     return player, logger, bpm_estimation

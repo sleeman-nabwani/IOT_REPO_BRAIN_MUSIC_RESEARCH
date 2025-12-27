@@ -23,8 +23,8 @@ typedef struct {
 StepEvent stepEvent;
 
 //pressure threshold along with buffer for consistency:
-const int THRESHOLD = 900; // Lowered from 700 to catch lighter steps
-const int pressureBuffer = 200; // Lowered to ensure reset happens even with light contact
+const int THRESHOLD = 1200; // Lowered from 700 to catch lighter steps
+const int pressureBuffer = 600; // Lowered to ensure reset happens even with light contact
 
 uint32_t lastStepTime = 0;
 
@@ -86,6 +86,7 @@ void loop() {
   int leftFsr = readFiltered(LEFT_PIN);
   Serial.println("pressure:");
   Serial.println(rightFsr);
+  Serial.println(leftFsr);
   //resetting the flags:
   if(rightFsr <= THRESHOLD - pressureBuffer)
     rightFlag = false;
