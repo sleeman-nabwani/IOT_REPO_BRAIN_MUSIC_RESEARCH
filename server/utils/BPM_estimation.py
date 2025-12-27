@@ -83,17 +83,21 @@ class BPM_estimation:
         This runs ~100 times per second.
         It moves the current BPM a tiny bit closer to the Target BPM every time.
         """
-        # 1. Manual Mode Check
-        if self.manual_mode: return 
-        
-        # 2. Start Delay Check
-        # WARMUP STRATEGY: Hold steady for first 2 steps.
-        # Then (below), we use the Gradual Limiter to slide smoothy.
-        if self.step_count == 1:
+        now_ts = time.time()
+
+        # Manual mode: still emit data every loop so the graph updates even without steps.
+        if self.manual_mode:
+            if now_ts - self.last_gui_log_time > 0.1:
+                try:
+                    song_bpm = self.player.walkingBPM
+                    self.logger.log_data(now_ts, song_bpm, self.target_bpm or song_bpm, step_event=False)
+                except Exception:
+                    pass
+                self.last_gui_log_time = now_ts
             return
         
         # 3. Decay Logic (If user stops walking)
-        interval = time.time() - self.last_msg_time
+        interval = now_ts - self.last_msg_time
         if interval > 0:
             decay_limit = 60 / interval
             if decay_limit < self.target_bpm:
@@ -106,9 +110,8 @@ class BPM_estimation:
         current_bpm = self.player.walkingBPM
         
         # Calculate Delta Time (dt)
-        now = time.time()
-        dt = now - self.last_update_time
-        self.last_update_time = now
+        dt = now_ts - self.last_update_time
+        self.last_update_time = now_ts
         
         # optimized strictness: only update if diff is > 0.1
         diff = abs(self.target_bpm - current_bpm)
@@ -161,9 +164,12 @@ class BPM_estimation:
             if abs(new_bpm - current_bpm) > 1.0:
                 self.logger.log(f"BPM sliding: {current_bpm:.2f} -> {new_bpm:.2f} (Target: {self.target_bpm:.2f})")
             
-            # Log for the graph and broadcast to GUI
-            # THROTTLE: Only log every 0.1s (10Hz) to prevent crashing the GUI pipe
-            if time.time() - self.last_gui_log_time > 0.1:
-                self.logger.log_data(time.time(), new_bpm, self.target_bpm)
-                self.last_gui_log_time = time.time()
+        # Always emit a packet periodically so the GUI updates even without diff
+        if now_ts - self.last_gui_log_time > 0.1:
+            try:
+                song_bpm = self.player.walkingBPM
+                self.logger.log_data(now_ts, song_bpm, self.target_bpm, step_event=False)
+            except Exception:
+                pass
+            self.last_gui_log_time = now_ts
 

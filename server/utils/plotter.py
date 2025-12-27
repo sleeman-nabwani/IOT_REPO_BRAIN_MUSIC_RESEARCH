@@ -240,11 +240,13 @@ class LivePlotter:
         # We store these so we can just update their data later instead of recreating them.
         self.line_walker = None 
         self.line_song = None 
-        
+        self.line_double = None
+        self.line_half = None
         self.scat_steps = None
         
         self.show_double = False
         self.show_half = False
+        self.hold_seconds = 6  # unused now; retained for tuning if needed
 
         # Track maximum X value seen to prevent graph from shrinking/resetting
         self.max_x_seen = 10  # Start with 10 seconds as minimum view
@@ -256,6 +258,33 @@ class LivePlotter:
         self.ax1.set_xlim(0, self.max_x_seen)
         self.ax1.set_ylim(0, 160) # Initial view
         
+    def reset(self):
+        """Clear all plotted data and reset axes limits."""
+        self.max_x_seen = 10
+        lw = getattr(self, "line_walker", None)
+        ls = getattr(self, "line_song", None)
+        ld = getattr(self, "line_double", None)
+        lh = getattr(self, "line_half", None)
+        sc = getattr(self, "scat_steps", None)
+
+        if lw is not None:
+            lw.set_data([], [])
+        if ls is not None:
+            ls.set_data([], [])
+        if ld is not None:
+            ld.set_data([], [])
+        if lh is not None:
+            lh.set_data([], [])
+        if sc is not None:
+            try:
+                sc.remove()
+            except Exception:
+                pass
+            self.scat_steps = None
+        self.ax1.set_xlim(0, self.max_x_seen)
+        self.ax1.set_ylim(0, 160)
+        self.ax1.figure.canvas.draw_idle()
+
     def set_show_multipliers(self, double, half):
         self.show_double = double
         self.show_half = half
@@ -302,23 +331,37 @@ class LivePlotter:
         w = w[valid_mask].reset_index(drop=True)
         s = s[valid_mask].reset_index(drop=True)
         step_events = step_events[valid_mask].reset_index(drop=True)
+
+        # Keep only a recent window to reduce draw cost
+        if len(t) > 0:
+            recent_mask = t >= (t.max() - 180)  # last 3 minutes
+            t = t[recent_mask].reset_index(drop=True)
+            w = w[recent_mask].reset_index(drop=True)
+            s = s[recent_mask].reset_index(drop=True)
+            step_events = step_events[recent_mask].reset_index(drop=True)
+
+            # Re-base time to start at zero for the visible window
+            t0 = t.min()
+            t = t - t0
         
         if len(t) == 0:
             return
         
-        # Sample-and-Hold for Walking BPM (Blue Line)
-        # We only trust 'w' when a step actually occurred (step_event=True).
-        # Between steps, we persist the last known step value (Staircase).
-        # This ignores the 'decay' values sent by the estimator, preventing drops.
-        w = w.where(step_events, float("nan"))
-        
-        # SMOOTHING: Use Linear Interpolation to connect dots
-        w = w.interpolate(method='linear', limit_direction='both')
+        # Song BPM: allow it to show even before steps, fill gaps
+        s = s.ffill().bfill()
 
-        # Prevent a trailing line past the last actual step event
-        if step_events.any():
-            last_step_idx = step_events[step_events].index.max()
-            w.loc[w.index > last_step_idx] = float("nan")
+        # Force a starting point at t=0 for song BPM
+        if len(t) == 0:
+            return
+        if t.iloc[0] > 0 or pd.isna(t.iloc[0]):
+            t = pd.concat([pd.Series([0.0]), t], ignore_index=True)
+            s = pd.concat([pd.Series([s.iloc[0]]), s], ignore_index=True)
+            w = pd.concat([pd.Series([float("nan")]), w], ignore_index=True)
+            step_events = pd.concat([pd.Series([False]), step_events], ignore_index=True)
+
+        # Walking BPM: show only where steps occurred, connect gaps only between steps
+        w = w.where(step_events, float("nan"))
+        w = w.interpolate(method='linear', limit_area='inside')  # connect between step events only
         
         # --- PLOT 1: BPM (Top) ---
         if self.line_song is None:
@@ -362,7 +405,7 @@ class LivePlotter:
         new_ymax = max(160, current_max + 10)
         self.ax1.set_ylim(0, new_ymax)
 
-        # Scatter points (Footsteps) - with safety guards
+        # Scatter points (Footsteps) - with safety guards and recent-window limit
         try:
             if self.scat_steps is not None:
                 self.scat_steps.remove()
@@ -372,11 +415,13 @@ class LivePlotter:
             
         try:
             if step_events.any():
-                step_t = t[step_events]
-                step_w = w[step_events]
+                # Only plot recent points to reduce draw load
+                recent_mask = t >= (t.max() - 120)  # last 2 minutes
+                step_mask = step_events & recent_mask
+                step_t = t[step_mask]
+                step_w = w[step_mask]
                 if len(step_t) > 0:
-                    # Accent dots (distinct from line color)
-                    self.scat_steps = self.ax1.scatter(step_t, step_w, color="#f59e0b", s=14, zorder=5)
+                    self.scat_steps = self.ax1.scatter(step_t, step_w, color="#f59e0b", s=12, zorder=5)
         except Exception:
             pass  # Silently ignore scatter errors to prevent crashes
 
