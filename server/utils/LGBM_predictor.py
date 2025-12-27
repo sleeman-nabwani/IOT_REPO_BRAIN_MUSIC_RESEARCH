@@ -50,3 +50,4 @@ class LGBMPredictor:
         X_scaled = self.scaler.transform(X)
         return float(self.model.predict(X_scaled)[0])
 
+
