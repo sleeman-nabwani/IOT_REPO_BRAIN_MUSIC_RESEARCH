@@ -16,7 +16,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_absolute_error, r2_score
 import matplotlib.pyplot as plt
 from pathlib import Path
-from analyze_data import load_all_sessions
+from analyze_data import load_all_sessions, remove_spikes
 
 # Output directories for results
 RESULTS_DIR = Path(__file__).parent / "results"
@@ -24,6 +24,16 @@ PLOTS_DIR = RESULTS_DIR / "plots"
 MODELS_DIR = RESULTS_DIR / "models"
 PLOTS_DIR.mkdir(parents=True, exist_ok=True)
 MODELS_DIR.mkdir(parents=True, exist_ok=True)
+
+def filter_true_steps(df: pd.DataFrame) -> pd.DataFrame:
+    """Keep only rows marked as true steps if the column exists."""
+    if "step_event" not in df.columns:
+        return df
+    mask = df["step_event"]
+    if mask.dtype == object:
+        mask = mask.astype(str).str.lower() == "true"
+    return df[mask].copy()
+
 
 def prepare_dataset(df, window_size=3):
     """
@@ -49,11 +59,19 @@ def train_knn_model():
     df = load_all_sessions(str(logs_dir))
     
     if df.empty:
-        print("No data found! Run some sessions first.")
-        return
+        print("No data found! Creating a DUMMY model to allow app startup.")
+        # Create synthetic data so we can at least train a valid model structure
+        data = []
+        for i in range(50):
+            data.append({"walking_bpm": 100 + (i % 5)}) # pattern: 100, 101, 102, 103, 104...
+        df = pd.DataFrame(data)
+
 
     # Filter Valid Data
     df = df[df['walking_bpm'] > 0]
+    df = filter_true_steps(df)
+    df = remove_spikes(df, col="walking_bpm", window=5, threshold=200)
+    df = df[df["walking_bpm"] <= 400]
     print(f"Training on {len(df)} steps.")
 
     # 2. Auto-Tune: Find optimal lookback window
@@ -86,7 +104,7 @@ def train_knn_model():
             best_window = window
     
     print("-" * 40)
-    print(f"✓ Best window: {best_window} (MAE={best_mae:.2f} BPM)")
+    print(f"[DONE] Best window: {best_window} (MAE={best_mae:.2f} BPM)")
     print()
     
     # 3. Train final model with best window
@@ -107,14 +125,14 @@ def train_knn_model():
     print(f"  MODEL PERFORMANCE REPORT")
     print(f"="*50)
     print(f"Mean Absolute Error (MAE): {mae:.2f} BPM")
-    print(f"R² Score: {r2:.3f}")
-    print(f"\n📊 HOW TO INTERPRET:")
-    print(f"   MAE < 5 BPM  → Excellent (Usable in production)")
-    print(f"   MAE 5-10 BPM → Good (Noticeable but helpful)")
-    print(f"   MAE > 10 BPM → Poor (Need more/better data)")
-    print(f"\n   R² > 0.7 → Strong prediction")
-    print(f"   R² 0.3-0.7 → Moderate prediction")
-    print(f"   R² < 0.3 → Weak prediction")
+    print(f"R^2 Score: {r2:.3f}")
+    print(f"\n[INFO] HOW TO INTERPRET:")
+    print(f"   MAE < 5 BPM  -> Excellent (Usable in production)")
+    print(f"   MAE 5-10 BPM -> Good (Noticeable but helpful)")
+    print(f"   MAE > 10 BPM -> Poor (Need more/better data)")
+    print(f"\n   R^2 > 0.7 -> Strong prediction")
+    print(f"   R^2 0.3-0.7 -> Moderate prediction")
+    print(f"   R^2 < 0.3 -> Weak prediction")
     print(f"="*50)
     
     # 6. Visualize Prediction vs Reality (subset)
@@ -135,7 +153,7 @@ def train_knn_model():
     model_path = MODELS_DIR / "knn_model.joblib"
     joblib.dump({"model": knn, "window": WINDOW_SIZE}, model_path)
     print(f"Model exported to '{model_path}'")
-    print(f"\nExample: Input {X_test[0].tolist()} → Predicted {knn.predict([X_test[0]])[0]:.1f} BPM")
+    print(f"\nExample: Input {X_test[0].tolist()} -> Predicted {knn.predict([X_test[0]])[0]:.1f} BPM")
     
     return knn, WINDOW_SIZE
 

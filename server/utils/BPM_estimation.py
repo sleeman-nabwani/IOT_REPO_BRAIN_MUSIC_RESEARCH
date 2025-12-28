@@ -1,11 +1,13 @@
 import time
+import threading
 from .midi_player import MidiBeatSync
 from .logger import Logger
-from .KNN_predictor import KNNPredictor
+from .LGBM_predictor import LGBMPredictor
 
 class BPM_estimation:
     def __init__(self, player: MidiBeatSync, logger: Logger, manual_mode: bool = False,
-                manual_bpm: float = None, knn_predictor: KNNPredictor = None) -> None:
+                manual_bpm: float = None, prediction_model: LGBMPredictor = None,
+                smoothing_window: int = 3, stride: int = 1) -> None:
         self.last_msg_time = time.time()
         self.player = player
         self.logger = logger
@@ -15,7 +17,12 @@ class BPM_estimation:
         self.smoothing_alpha_up = 0.025   # Smoothing when speeding up (Attack)
         self.smoothing_alpha_down = 0.025 # Smoothing when slowing down (Decay)
         self.step_count = 0 # Track number of steps for delayed start
-        self.knn_predictor = knn_predictor
+        self.prediction_model = prediction_model
+        self._warmup_done = threading.Event()
+        self._warmup_failed = False
+        self._warmup_thread = None
+        self.smoothing_window = smoothing_window
+        self.stride = stride
         
         # TARGET BPM: This is where we WANT to be.
         # The 'walkingBPM' is where we ARE currently.
@@ -25,6 +32,13 @@ class BPM_estimation:
         # Time-Based Smoothing
         self.last_update_time = time.time()
         self.last_gui_log_time = time.time()
+
+        # Warm-up the predictor off the main path to avoid first-step stall.
+        if self.prediction_model:
+            self._warmup_thread = threading.Thread(
+                target=self._run_warmup, args=(player.walkingBPM,), daemon=True
+            )
+            self._warmup_thread.start()
 
     # Added this in order to change the smoothing factor at runtime:
     # Added this in order to change the smoothing factor at runtime:
@@ -52,7 +66,7 @@ class BPM_estimation:
             return bpm
         return None
 
-    def register_step(self, new_bpm):
+    def register_step(self, new_bpm, instant_bpm=None):
         """
         Called when a NEW STEP is detected. 
         Instead of changing music instantly, we just update the TARGET.
@@ -63,13 +77,27 @@ class BPM_estimation:
         self.last_msg_time = time.time() # Reset the decay timer
         self.step_count += 1
         
-        #KNN Predictor:
-        if self.knn_predictor:
-            self.knn_predictor.add_step(new_bpm)
-            predicted_bpm = self.knn_predictor.predict_next()
-            print(f"Predicted BPM: {predicted_bpm}#####################################")
-            if predicted_bpm is not None:
-                self.target_bpm = predicted_bpm
+        # Prediction model (LightGBM) — only after warmup completes.
+        if self.prediction_model and self._warmup_done.is_set() and not self._warmup_failed:
+            try:
+                self.prediction_model.add_step(new_bpm, instant_bpm)
+                pred = self.prediction_model.predict_next(
+                    smoothing_window=self.smoothing_window,
+                    stride=self.stride,
+                )
+                if pred is not None:
+                    # Blend to avoid sudden jumps while still using fresh prediction.
+                    self.target_bpm = float(pred) * 0.65 + new_bpm * 0.35
+            except Exception:
+                pass
+
+    def _run_warmup(self, initial_bpm: float | None):
+        try:
+            self.prediction_model.warmup(initial_bpm)
+        except Exception:
+            self._warmup_failed = True
+        finally:
+            self._warmup_done.set()
 
 
     def update_recorded_values(self,last_msg_time: float, last_recorded_bpm: float):
@@ -83,17 +111,21 @@ class BPM_estimation:
         This runs ~100 times per second.
         It moves the current BPM a tiny bit closer to the Target BPM every time.
         """
-        # 1. Manual Mode Check
-        if self.manual_mode: return 
-        
-        # 2. Start Delay Check
-        # WARMUP STRATEGY: Hold steady for first 2 steps.
-        # Then (below), we use the Gradual Limiter to slide smoothy.
-        if self.step_count == 1:
+        now_ts = time.time()
+
+        # Manual mode: still emit data every loop so the graph updates even without steps.
+        if self.manual_mode:
+            if now_ts - self.last_gui_log_time > 0.1:
+                try:
+                    song_bpm = self.player.walkingBPM
+                    self.logger.log_data(now_ts, song_bpm, self.target_bpm or song_bpm, step_event=False)
+                except Exception:
+                    pass
+                self.last_gui_log_time = now_ts
             return
         
         # 3. Decay Logic (If user stops walking)
-        interval = time.time() - self.last_msg_time
+        interval = now_ts - self.last_msg_time
         if interval > 0:
             decay_limit = 60 / interval
             if decay_limit < self.target_bpm:
@@ -106,9 +138,8 @@ class BPM_estimation:
         current_bpm = self.player.walkingBPM
         
         # Calculate Delta Time (dt)
-        now = time.time()
-        dt = now - self.last_update_time
-        self.last_update_time = now
+        dt = now_ts - self.last_update_time
+        self.last_update_time = now_ts
         
         # optimized strictness: only update if diff is > 0.1
         diff = abs(self.target_bpm - current_bpm)
@@ -161,9 +192,12 @@ class BPM_estimation:
             if abs(new_bpm - current_bpm) > 1.0:
                 self.logger.log(f"BPM sliding: {current_bpm:.2f} -> {new_bpm:.2f} (Target: {self.target_bpm:.2f})")
             
-            # Log for the graph and broadcast to GUI
-            # THROTTLE: Only log every 0.1s (10Hz) to prevent crashing the GUI pipe
-            if time.time() - self.last_gui_log_time > 0.1:
-                self.logger.log_data(time.time(), new_bpm, self.target_bpm)
-                self.last_gui_log_time = time.time()
+        # Always emit a packet periodically so the GUI updates even without diff
+        if now_ts - self.last_gui_log_time > 0.1:
+            try:
+                song_bpm = self.player.walkingBPM
+                self.logger.log_data(now_ts, song_bpm, self.target_bpm, step_event=False)
+            except Exception:
+                pass
+            self.last_gui_log_time = now_ts
 

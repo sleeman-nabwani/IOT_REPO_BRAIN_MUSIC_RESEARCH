@@ -83,8 +83,7 @@ def handle_step(raw_line: str, walking_bpm: float):
     if bpm == 0.0:
         bpm = walking_bpm
 
-    current_ts = time.time()
-    return bpm, instant_bpm, current_ts
+    return bpm, instant_bpm, ts, foot
 
 # communication with the GUI
 def handle_engine_command(cmd, ser, logger, bpm_estimation, player):
