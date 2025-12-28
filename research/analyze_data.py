@@ -12,11 +12,42 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 import glob
 import os
+import json
 
 # Output directory for results
 RESULTS_DIR = Path(__file__).parent / "results"
 PLOTS_DIR = RESULTS_DIR / "plots"
 PLOTS_DIR.mkdir(parents=True, exist_ok=True)
+
+def _read_session(csv_path: str):
+    """
+    Read a single session CSV, parse optional # meta line for params,
+    attach session_id, smoothing_window, stride.
+    """
+    session_id = Path(csv_path).parent.name
+    meta = {"smoothing_window": 3, "stride": 1}
+    # Read first line for meta
+    try:
+        with open(csv_path, "r", encoding="utf-8") as f:
+            first = f.readline()
+            if first.startswith("#"):
+                tag, _, rest = first.partition(":")
+                if tag.strip() == "# meta":
+                    meta.update(json.loads(rest.strip()))
+    except Exception:
+        pass
+    try:
+        df = pd.read_csv(csv_path, comment="#")
+    except Exception as e:
+        print(f"Error reading {csv_path}: {e}")
+        return None
+    if df.empty:
+        return None
+    df["session_id"] = session_id
+    df["smoothing_window"] = meta.get("smoothing_window", 3)
+    df["stride"] = meta.get("stride", 1)
+    return df
+
 
 def load_all_sessions(base_dir):
     """
@@ -30,14 +61,9 @@ def load_all_sessions(base_dir):
     
     dfs = []
     for f in csv_files:
-        try:
-            df = pd.read_csv(f)
-            # Add session ID to distinguish them
-            session_id = Path(f).parent.name
-            df['session_id'] = session_id
+        df = _read_session(f)
+        if df is not None:
             dfs.append(df)
-        except Exception as e:
-            print(f"Error reading {f}: {e}")
             
     if not dfs:
         return pd.DataFrame()

@@ -25,12 +25,14 @@ except ImportError as exc:
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 BASE_DIR = PROJECT_ROOT
 RESEARCH_DIR = PROJECT_ROOT / "research"
-PARENT_ANALYZE = RESEARCH_DIR / "analyze_data.py"
-spec = importlib.util.spec_from_file_location("research_analyze_data", PARENT_ANALYZE)
-parent_mod = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(parent_mod)  # type: ignore
-load_all_sessions = parent_mod.load_all_sessions
-remove_spikes = getattr(parent_mod, "remove_spikes", lambda df, col="walking_bpm", window=5, threshold=200: df)
+
+# Load LightGBM analysis helpers from this directory without clashing names.
+LGBM_ANALYZE = Path(__file__).parent / "analyze_data.py"
+spec_lgbm = importlib.util.spec_from_file_location("lgbm_analyze_data", LGBM_ANALYZE)
+lgbm_analyze = importlib.util.module_from_spec(spec_lgbm)
+spec_lgbm.loader.exec_module(lgbm_analyze)  # type: ignore
+get_raw_and_processed_sessions = lgbm_analyze.get_raw_and_processed_sessions
+build_lag_features = lgbm_analyze.build_lag_features
 
 # Paths
 RESULTS_DIR = Path(__file__).parent / "results"
@@ -44,39 +46,16 @@ TEST_SIZE = 0.2
 RANDOM_SEED = 42
 
 
-def filter_true_steps(df):
-    if "step_event" not in df.columns:
-        return df
-    mask = df["step_event"]
-    if mask.dtype == object:
-        mask = mask.astype(str).str.lower() == "true"
-    return df[mask].copy()
-
-
-def build_lag_features(df, window_size: int):
-    sequences, targets = [], []
-    for _, group in df.groupby("session_id"):
-        values = group["walking_bpm"].values
-        for idx in range(window_size, len(values)):
-            sequences.append(values[idx - window_size : idx])
-            targets.append(values[idx])
-    if not sequences:
-        return np.array([]), np.array([])
-    return np.array(sequences, dtype=np.float32), np.array(targets, dtype=np.float32)
-
-
 def tune_lgbm():
     logs_dir = BASE_DIR / "server" / "logs"
-    print(f"Loading data from '{logs_dir}'...")
-    df = load_all_sessions(str(logs_dir))
-    if df.empty:
+    raw_df, df = get_raw_and_processed_sessions(logs_dir)
+    if raw_df.empty:
         print("No data found.")
         return
 
-    df = df[df["walking_bpm"] > 0].copy()
-    df = filter_true_steps(df)
-    df = remove_spikes(df, col="walking_bpm", window=5, threshold=200)
-    df = df[df["walking_bpm"] <= 400]
+    if df.empty:
+        print("No valid walking_bpm values after filtering.")
+        return
 
     window_grid = [3, 4, 5, 6, 7, 8]
     param_grid = {
@@ -89,9 +68,15 @@ def tune_lgbm():
     best = {"mae": float("inf")}
 
     for w in window_grid:
-        X, y = build_lag_features(df, window_size=w)
-        if len(X) < 20:
+        X_lag, y, meta = build_lag_features(df, window_size=w)
+        if len(X_lag) < 20:
             continue
+        X = np.concatenate([X_lag, meta], axis=1) if len(meta) > 0 else X_lag
+        finite_mask = np.isfinite(X).all(axis=1)
+        if finite_mask.sum() < len(finite_mask):
+            X = X[finite_mask]
+            y = y[finite_mask]
+
         X_train, X_test, y_train, y_test = train_test_split(
             X, y, test_size=TEST_SIZE, random_state=RANDOM_SEED
         )

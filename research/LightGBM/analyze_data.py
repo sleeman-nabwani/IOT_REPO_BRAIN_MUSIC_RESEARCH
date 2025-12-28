@@ -8,6 +8,7 @@ import importlib.util
 from pathlib import Path
 
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 
 # Load the shared loader from research/analyze_data.py without clashing with this module's name.
@@ -19,47 +20,183 @@ spec = importlib.util.spec_from_file_location("research_analyze_data", PARENT_AN
 parent_mod = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(parent_mod)  # type: ignore
 load_all_sessions = parent_mod.load_all_sessions
+remove_spikes = getattr(parent_mod, "remove_spikes", lambda df, col="walking_bpm", window=5, threshold=200: df)
 
 # Output directories for results
 RESULTS_DIR = Path(__file__).parent / "results"
 PLOTS_DIR = RESULTS_DIR / "plots"
 PLOTS_DIR.mkdir(parents=True, exist_ok=True)
+LOGS_DIR = BASE_DIR / "server" / "logs"
 
 
-def analyze_bpm_distribution():
+def filter_true_steps(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Loads all session data and creates basic BPM visualizations.
+    Keep only rows marked as true steps if the 'step_event' column exists.
+    Accepts boolean or string 'True'/'False'. If column missing, returns df unchanged.
     """
-    logs_dir = BASE_DIR / "server" / "logs"
-    print(f"Loading data from '{logs_dir}'...")
-    df = load_all_sessions(str(logs_dir))
+    if "step_event" not in df.columns:
+        return df
+    mask = df["step_event"]
+    if mask.dtype == object:
+        mask = mask.astype(str).str.lower() == "true"
+    return df[mask].copy()
 
+
+def filter_positive_bpm(df: pd.DataFrame, col: str = "walking_bpm") -> pd.DataFrame:
+    """Drop rows with non-positive BPM values."""
+    if col not in df.columns:
+        return df
+    return df[df[col] > 0].copy()
+
+
+def drop_high_spikes(df: pd.DataFrame, col: str = "walking_bpm", window: int = 5, min_bpm: float = 150, deviation: float = 50) -> pd.DataFrame:
+    """
+    Remove spikes only when the value is high AND far from the local median:
+    keep rows where bpm < min_bpm OR |bpm - rolling_median| <= deviation.
+    """
+    if col not in df.columns:
+        return df
+    med = df[col].rolling(window=window, center=True, min_periods=1).median()
+    mask = (df[col] < min_bpm) | ((df[col] - med).abs() <= deviation)
+    return df[mask].copy()
+
+
+def process_walking_data(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Apply the standard LightGBM preprocessing pipeline:
+    - positive BPM only
+    - true step events when available
+    - rolling-median spike removal
+    - high-spike suppression
+    - clamp BPM to a sane upper bound
+    """
     if df.empty:
-        print("No data found.")
+        return df
+    cleaned = filter_positive_bpm(df)
+    cleaned = filter_true_steps(cleaned)
+    cleaned = remove_spikes(cleaned, col="walking_bpm", window=5, threshold=200)
+    cleaned = drop_high_spikes(cleaned, col="walking_bpm", window=5, min_bpm=150, deviation=50)
+    cleaned = cleaned.replace([np.inf, -np.inf], np.nan).dropna(subset=["walking_bpm"])
+    return cleaned
+
+
+def load_raw_sessions(logs_dir=None) -> pd.DataFrame:
+    """Load all session CSVs without any preprocessing."""
+    resolved = Path(logs_dir) if logs_dir is not None else LOGS_DIR
+    print(f"Loading data from '{resolved}'...")
+    return load_all_sessions(str(resolved))
+
+
+def get_raw_and_processed_sessions(logs_dir=None):
+    """Return both raw and processed DataFrames for the requested logs directory."""
+    raw_df = load_raw_sessions(logs_dir)
+    if raw_df.empty:
+        return raw_df, raw_df
+    processed = process_walking_data(raw_df)
+    return raw_df, processed
+
+
+def load_processed_sessions(logs_dir=None) -> pd.DataFrame:
+    """Convenience wrapper that returns only the processed DataFrame."""
+    _, processed = get_raw_and_processed_sessions(logs_dir)
+    return processed
+
+
+def build_lag_features(df: pd.DataFrame, window_size: int):
+    """
+    Create sliding window lag features for one-step-ahead prediction.
+    Uses both smoothed walking_bpm and per-step instant_bpm, and carries
+    session-level meta (smoothing_window, stride).
+    """
+    sequences, targets, metas = [], [], []
+
+    def _to_seconds(tstr: str) -> float:
+        parts = tstr.split(":")
+        return float(parts[0]) * 3600 + float(parts[1]) * 60 + float(parts[2])
+
+    df = df.copy()
+    if "time" in df.columns:
+        try:
+            df["seconds"] = df["time"].apply(_to_seconds)
+        except Exception:
+            df["seconds"] = pd.NA
+    else:
+        df["seconds"] = pd.NA
+
+    for _, group in df.groupby("session_id"):
+        g = group.copy()
+        try:
+            g = g.sort_values("seconds", kind="mergesort")
+        except Exception:
+            pass
+
+        inst = g["instant_bpm"].copy() if "instant_bpm" in g.columns else None
+        if inst is None or inst.isna().all():
+            try:
+                sec = g["seconds"].astype(float)
+                delta = sec.diff()
+                delta = delta.where(delta > 0)
+                inst = 60.0 / delta
+            except Exception:
+                inst = None
+
+        walk_vals = g["walking_bpm"].to_numpy(dtype=float)
+        if inst is not None:
+            inst_vals = (
+                inst.ffill().bfill().fillna(g["walking_bpm"]).to_numpy(dtype=float)
+            )
+        else:
+            inst_vals = walk_vals.copy()
+
+        finite_mask = np.isfinite(walk_vals) & np.isfinite(inst_vals)
+        walk_vals = walk_vals[finite_mask]
+        inst_vals = inst_vals[finite_mask]
+
+        sw = g["smoothing_window"].iloc[0] if "smoothing_window" in g else 3
+        st = g["stride"].iloc[0] if "stride" in g else 1
+        for idx in range(window_size, len(walk_vals)):
+            walk_slice = walk_vals[idx - window_size : idx]
+            inst_slice = inst_vals[idx - window_size : idx]
+            sequences.append(list(walk_slice) + list(inst_slice))
+            targets.append(walk_vals[idx])
+            metas.append([sw, st])
+    if not sequences:
+        return np.array([]), np.array([]), np.array([])
+    return (
+        np.array(sequences, dtype=np.float32),
+        np.array(targets, dtype=np.float32),
+        np.array(metas, dtype=np.float32),
+    )
+
+
+def _plot_distribution(df: pd.DataFrame, title_prefix: str, output_name: str):
+    """Internal helper to plot histogram + correlation scatter."""
+    if df.empty:
+        print(f"Skipping {title_prefix.lower()} plot: no data.")
         return
 
-    df = df[df["walking_bpm"] > 0]
-    if df.empty:
-        print("No valid walking_bpm values after filtering.")
+    # Ensure numeric for plotting
+    work = df.copy()
+    work["walking_bpm"] = pd.to_numeric(work.get("walking_bpm", pd.NA), errors="coerce")
+    work["song_bpm"] = pd.to_numeric(work.get("song_bpm", pd.NA), errors="coerce")
+    work = work.dropna(subset=["walking_bpm", "song_bpm"])
+    if work.empty:
+        print(f"Skipping {title_prefix.lower()} plot: no numeric data.")
         return
-
-    print(f"Valid walking points: {len(df)}")
 
     plt.figure(figsize=(10, 6))
 
-    # Histogram of BPMs
     plt.subplot(2, 1, 1)
-    plt.hist(df["walking_bpm"], bins=range(0, 651, 5), color="seagreen", edgecolor="black")
-    plt.title("Distribution of Walking BPM")
+    plt.hist(work["walking_bpm"], bins=range(0, 651, 5), color="seagreen", edgecolor="black")
+    plt.title(f"{title_prefix} - Distribution of Walking BPM")
     plt.xlabel("BPM")
     plt.ylabel("Count")
     plt.xlim(0, 650)
 
-    # Scatter: BPM vs Music BPM (sampled)
     plt.subplot(2, 1, 2)
-    sample = df.sample(min(len(df), 2000))
+    sample = work.sample(min(len(work), 2000))
     plt.scatter(sample["walking_bpm"], sample["song_bpm"], alpha=0.3, s=10, label="Samples")
-    plt.title("Walking BPM vs Music BPM")
+    plt.title(f"{title_prefix} - Walking BPM vs Music BPM")
     plt.xlabel("User Walking BPM")
     plt.ylabel("Music BPM")
     plt.plot(
@@ -71,9 +208,26 @@ def analyze_bpm_distribution():
     plt.legend()
 
     plt.tight_layout()
-    output_path = PLOTS_DIR / "lgbm_bpm_distribution.png"
+    output_path = PLOTS_DIR / output_name
     plt.savefig(output_path)
     print(f"Saved '{output_path}'")
+
+
+def analyze_bpm_distribution(logs_dir=None):
+    """
+    Load sessions, apply the LightGBM preprocessing pipeline, and produce
+    two plots: one for raw data and one for processed data.
+    """
+    raw_df, processed_df = get_raw_and_processed_sessions(logs_dir)
+
+    if raw_df.empty:
+        print("No data found.")
+        return
+
+    print(f"Raw points: {len(raw_df)}, Processed points: {len(processed_df)}")
+
+    _plot_distribution(raw_df, "Raw Walking Data", "lgbm_raw_bpm_distribution.png")
+    _plot_distribution(processed_df, "Processed Walking Data", "lgbm_processed_bpm_distribution.png")
 
 
 if __name__ == "__main__":

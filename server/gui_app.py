@@ -272,7 +272,7 @@ class GuiApp:
         self.smoothing_up_var = tk.StringVar() 
         entry_up = ttk.Entry(attack_row, textvariable=self.smoothing_up_var, width=15, font=("Segoe UI", 12))
         entry_up.pack(side="left", padx=(0, 5))
-        self._bind_placeholder(entry_up, self.smoothing_up_var, "Set Climbing")
+        self._bind_placeholder(entry_up, self.smoothing_up_var, "Default (engine)")
         
         ttk.Button(attack_row, text="?", style="Help.TButton", width=2, command=self.show_attack_help).pack(side="left", padx=5)
 
@@ -285,7 +285,7 @@ class GuiApp:
         self.smoothing_down_var = tk.StringVar()
         entry_down = ttk.Entry(decay_row, textvariable=self.smoothing_down_var, width=15, font=("Segoe UI", 12))
         entry_down.pack(side="left", padx=(0, 5))
-        self._bind_placeholder(entry_down, self.smoothing_down_var, "Set Cascading")
+        self._bind_placeholder(entry_down, self.smoothing_down_var, "Default (engine)")
 
         ttk.Button(decay_row, text="?", style="Help.TButton", width=2, command=self.show_decay_help).pack(side="left", padx=5)
 
@@ -297,7 +297,7 @@ class GuiApp:
         self.step_window_var = tk.StringVar()
         entry_win = ttk.Entry(window_row, textvariable=self.step_window_var, width=15, font=("Segoe UI", 12))
         entry_win.pack(side="left", padx=(0, 5))
-        self._bind_placeholder(entry_win, self.step_window_var, "Set Window")
+        self._bind_placeholder(entry_win, self.step_window_var, "Default (engine)")
         ttk.Label(window_row, text="Steps", style="Sub.TLabel").pack(side="left", padx=(0, 5))
         ttk.Button(window_row, text="?", style="Help.TButton", width=2, command=self.show_window_help).pack(side="left", padx=5)
 
@@ -497,13 +497,15 @@ class GuiApp:
 
         try:
             raw_sw = self.step_window_var.get().strip()
-            sw = int(raw_sw) if raw_sw and raw_sw.isdigit() else 6 
-        except: sw = 6 
+            sw = int(raw_sw) if raw_sw and raw_sw.isdigit() else None  # None -> use engine default
+        except:
+            sw = None
 
         try:
             raw_st = self.stride_var.get().strip()
-            st = int(raw_st) if raw_st and raw_st.isdigit() else 1
-        except: st = 1
+            st = int(raw_st) if raw_st and raw_st.isdigit() else None  # None -> use engine default
+        except:
+            st = None
 
         # Climbing/Cascading Alphas
         au = None

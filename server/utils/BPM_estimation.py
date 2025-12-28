@@ -6,7 +6,8 @@ from .LGBM_predictor import LGBMPredictor
 
 class BPM_estimation:
     def __init__(self, player: MidiBeatSync, logger: Logger, manual_mode: bool = False,
-                manual_bpm: float = None, prediction_model: LGBMPredictor = None) -> None:
+                manual_bpm: float = None, prediction_model: LGBMPredictor = None,
+                smoothing_window: int = 3, stride: int = 1) -> None:
         self.last_msg_time = time.time()
         self.player = player
         self.logger = logger
@@ -20,6 +21,8 @@ class BPM_estimation:
         self._warmup_done = threading.Event()
         self._warmup_failed = False
         self._warmup_thread = None
+        self.smoothing_window = smoothing_window
+        self.stride = stride
         
         # TARGET BPM: This is where we WANT to be.
         # The 'walkingBPM' is where we ARE currently.
@@ -63,7 +66,7 @@ class BPM_estimation:
             return bpm
         return None
 
-    def register_step(self, new_bpm):
+    def register_step(self, new_bpm, instant_bpm=None):
         """
         Called when a NEW STEP is detected. 
         Instead of changing music instantly, we just update the TARGET.
@@ -77,11 +80,14 @@ class BPM_estimation:
         # Prediction model (LightGBM) — only after warmup completes.
         if self.prediction_model and self._warmup_done.is_set() and not self._warmup_failed:
             try:
-                self.prediction_model.add_step(new_bpm)
-                pred = self.prediction_model.predict_next()
+                self.prediction_model.add_step(new_bpm, instant_bpm)
+                pred = self.prediction_model.predict_next(
+                    smoothing_window=self.smoothing_window,
+                    stride=self.stride,
+                )
                 if pred is not None:
                     # Blend to avoid sudden jumps while still using fresh prediction.
-                    self.target_bpm = float(pred) * 0.4 + new_bpm * 0.6
+                    self.target_bpm = float(pred) * 0.65 + new_bpm * 0.35
             except Exception:
                 pass
 

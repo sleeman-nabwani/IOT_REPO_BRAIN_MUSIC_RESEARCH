@@ -68,6 +68,18 @@ def parse_args() -> argparse.Namespace:
         help="Serial port for the ESP32 (default: COM3)",
     )
     parser.add_argument(
+        "--alpha-up",
+        type=float,
+        default=None,
+        help="Optional attack smoothing alpha override",
+    )
+    parser.add_argument(
+        "--alpha-down",
+        type=float,
+        default=None,
+        help="Optional decay smoothing alpha override",
+    )
+    parser.add_argument(
         "--disable-prediction-model",
         "--disable-prediction",
         dest="disable_prediction",
@@ -93,9 +105,11 @@ def start_stdin_listener(command_queue):
 
 def main(args, status_callback=print, stop_event=None, session_dir_callback=None, command_queue=None):
     midi_path = args.midi_path
-    
+    smoothing_window = getattr(args, 'smoothing', 3)
+    stride = getattr(args, 'stride', 1)
+
     # 1. Initialize Logger 
-    logger = Logger(gui_callback=status_callback, session_name=getattr(args, 'session_name', None))
+    logger = Logger(gui_callback=status_callback, session_name=getattr(args, 'session_name', None), smoothing_window=smoothing_window, stride=stride)
     
     # OUTPUT SESSION DIR FOR GUI PARSING
     # The GUI listens for "SESSION_DIR:..." to know where to save the plot.
@@ -152,7 +166,13 @@ def main(args, status_callback=print, stop_event=None, session_dir_callback=None
         manual_mode=args.manual,
         manual_bpm=args.bpm,
         prediction_model=prediction_model,
+        smoothing_window=smoothing_window,
+        stride=stride,
     )
+    if args.alpha_up is not None:
+        bpm_estimation.set_smoothing_alpha_up(args.alpha_up)
+    if args.alpha_down is not None:
+        bpm_estimation.set_smoothing_alpha_down(args.alpha_down)
     logger.log("Session started")
     
     # 6. Open Serial Port
@@ -165,10 +185,6 @@ def main(args, status_callback=print, stop_event=None, session_dir_callback=None
     except Exception as e:
         logger.log(f"Failed to open serial port {port}: {e}")
         return player, logger, bpm_estimation
-
-    # Config from arguments
-    smoothing_window = getattr(args, 'smoothing', 3)
-    stride = getattr(args, 'stride', 1)
 
     if not session_handshake(ser, logger, smoothing_window=smoothing_window, stride=stride):
         logger.log("Handshake failed; aborting session")
@@ -232,8 +248,8 @@ def main(args, status_callback=print, stop_event=None, session_dir_callback=None
         event_epoch = time.time()
         
         # register the step and log the data
-        bpm_estimation.register_step(bpm)
-        logger.log_data(event_epoch, player.walkingBPM, bpm, step_event=True)
+        bpm_estimation.register_step(bpm, instant_bpm)
+        logger.log_data(event_epoch, player.walkingBPM, bpm, step_event=True, instant_bpm=instant_bpm)
         logger.log(f"Processed: BPM={bpm}")
 
         # CPU Yield (Prevent 100% core usage)

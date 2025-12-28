@@ -25,7 +25,8 @@ class LGBMPredictor:
         self.model = None
         self.scaler = None
         self.window = None
-        self.buffer = None
+        self.extra_feature_names = ["smoothing_window", "stride"]
+        self.buffer = None  # deque of tuples: (walking_bpm, instant_bpm)
         self._lock = threading.Lock()
         self._load()
 
@@ -37,24 +38,33 @@ class LGBMPredictor:
             self.model = payload["model"]
             self.scaler = payload["scaler"]
             self.window = int(payload["window_size"])
+            schema = payload.get("feature_schema")
+            if schema and "extra" in schema:
+                self.extra_feature_names = schema["extra"]
         else:
             raise ValueError("Invalid LightGBM model file")
         self.buffer = deque(maxlen=self.window)
 
-    def add_step(self, bpm):
+    def add_step(self, walking_bpm, instant_bpm=None):
         if self.buffer is None:
             return
         with self._lock:
-            self.buffer.append(float(bpm))
+            if instant_bpm is None:
+                instant_bpm = walking_bpm
+            self.buffer.append((float(walking_bpm), float(instant_bpm)))
 
-    def predict_next(self):
+    def predict_next(self, smoothing_window: float | int = 3, stride: float | int = 1):
         if not self.model or self.buffer is None:
             return None
         with self._lock:
             if len(self.buffer) < self.window:
                 return None
             buf = list(self.buffer)
-        X = np.array([buf], dtype=float)
+        extras = [float(smoothing_window), float(stride)]
+        # Flatten: walk lags then instant lags
+        walk_lags = [p[0] for p in buf]
+        inst_lags = [p[1] for p in buf]
+        X = np.array([walk_lags + inst_lags + extras], dtype=float)
         X_scaled = self.scaler.transform(X)
         return float(self.model.predict(X_scaled)[0])
 
@@ -66,8 +76,11 @@ class LGBMPredictor:
         if not self.model or self.window is None or self.scaler is None:
             return
         bpm = float(initial_bpm) if initial_bpm is not None else 0.0
-        window_vals = np.full((1, self.window), bpm, dtype=float)
-        X_scaled = self.scaler.transform(window_vals)
+        walk = np.full((self.window,), bpm, dtype=float)
+        inst = np.full((self.window,), bpm, dtype=float)
+        extras = np.array([3.0, 1.0], dtype=float)
+        row = np.concatenate([walk, inst, extras])
+        X_scaled = self.scaler.transform(row.reshape(1, -1))
         # Ignore the output; the call warms up internal caches/threads.
         _ = self.model.predict(X_scaled)
 

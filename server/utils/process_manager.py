@@ -32,13 +32,15 @@ class SubprocessManager:
         if serial_port:
              cmd.extend(["--serial-port", str(serial_port)]) 
         
-        # We pass initial config via flags
-        cmd.extend(["--smoothing", str(smoothing_window)])
-        cmd.extend(["--stride", str(stride)])
+        # We pass initial config via flags only if provided (engine has defaults)
+        if smoothing_window is not None:
+            cmd.extend(["--smoothing", str(smoothing_window)])
+        if stride is not None:
+            cmd.extend(["--stride", str(stride)])
         
-        if alpha_up:
+        if alpha_up is not None:
             cmd.extend(["--alpha-up", str(alpha_up)])
-        if alpha_down:
+        if alpha_down is not None:
             cmd.extend(["--alpha-down", str(alpha_down)])
         
         if session_name:

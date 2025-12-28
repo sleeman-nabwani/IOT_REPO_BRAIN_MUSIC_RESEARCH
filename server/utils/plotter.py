@@ -31,7 +31,7 @@ def load_latest_csv():
         raise FileNotFoundError(f"No CSV found in {session_folder}")
     
     print(f"Loading CSV: {csv_path}")
-    df = pd.read_csv(csv_path)
+    df = pd.read_csv(csv_path, comment="#")
     return df, session_folder
 
 def _elapsed_to_seconds(value: str) -> float:
@@ -51,7 +51,7 @@ def generate_post_session_plot(folder_path):
         return
 
     try:
-        df = pd.read_csv(csv_path)
+        df = pd.read_csv(csv_path, comment="#")
         save_static_plot(df, folder)
     except Exception as e:
         print(f"Failed to generate plot: {e}")

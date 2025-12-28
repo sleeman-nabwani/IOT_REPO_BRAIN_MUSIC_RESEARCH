@@ -3,7 +3,7 @@
 :: LightGBM Research Pipeline Runner
 :: Runs the LightGBM analysis and training scripts
 :: Optional flags:
-::   --optimize              Run tune_lgbm.py (grid search) instead of train_lgbm.py
+::   --optimize              Run Optuna search inside train_lgbm.py
 ::   --head TARGET [SUFFIX]  Train a user head after model training (TARGET=user name or path)
 :: ============================================
 
@@ -89,6 +89,14 @@ if %errorlevel% neq 0 (
     pip install scikit-learn
 )
 
+if "%OPTIMIZE%"=="1" (
+    pip show optuna >nul 2>&1
+    if %errorlevel% neq 0 (
+        echo Installing optuna...
+        pip install optuna
+    )
+)
+
 :: Navigate to LightGBM research folder
 cd research\LightGBM
 
@@ -117,15 +125,9 @@ set TRAIN_ERR=%errorlevel%
 goto after_train
 
 :run_opt
-echo Using optimizer (tune_lgbm.py)...
-if exist tune_lgbm.py (
-    python tune_lgbm.py
-    set TRAIN_ERR=%errorlevel%
-) else (
-    echo ERROR: tune_lgbm.py not found in %cd%
-    pause
-    exit /b 1
-)
+echo Using optimizer (--optimize)...
+python train_lgbm.py --optimize
+set TRAIN_ERR=%errorlevel%
 
 :after_train
 if %TRAIN_ERR% neq 0 (
@@ -140,8 +142,10 @@ echo   LightGBM Pipeline Complete!
 echo ========================================
 echo.
 echo Generated files in research\LightGBM\results\:
-echo   - plots\lgbm_bpm_distribution.png
-echo   - plots\lgbm_performance.png
+echo   - plots\lgbm_raw_bpm_distribution.png
+echo   - plots\lgbm_processed_bpm_distribution.png
+echo   - plots\lgbm_baseline_performance.png
+echo   - plots\lgbm_tuned_performance.png
 echo   - models\lgbm_model.joblib
 echo.
 
