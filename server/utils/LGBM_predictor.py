@@ -1,5 +1,6 @@
 from pathlib import Path
 from collections import deque
+import threading
 import joblib
 import numpy as np
 
@@ -25,6 +26,7 @@ class LGBMPredictor:
         self.scaler = None
         self.window = None
         self.buffer = None
+        self._lock = threading.Lock()
         self._load()
 
     def _load(self):
@@ -40,13 +42,32 @@ class LGBMPredictor:
         self.buffer = deque(maxlen=self.window)
 
     def add_step(self, bpm):
-        if self.buffer is not None:
+        if self.buffer is None:
+            return
+        with self._lock:
             self.buffer.append(float(bpm))
 
     def predict_next(self):
-        if not self.model or len(self.buffer) < self.window:
+        if not self.model or self.buffer is None:
             return None
-        X = np.array([list(self.buffer)], dtype=float)
+        with self._lock:
+            if len(self.buffer) < self.window:
+                return None
+            buf = list(self.buffer)
+        X = np.array([buf], dtype=float)
         X_scaled = self.scaler.transform(X)
         return float(self.model.predict(X_scaled)[0])
+
+    def warmup(self, initial_bpm: float | None = None):
+        """
+        Run a single inference on a synthetic window to pay model/scaler warm-up
+        costs upfront. Does not mutate the live buffer.
+        """
+        if not self.model or self.window is None or self.scaler is None:
+            return
+        bpm = float(initial_bpm) if initial_bpm is not None else 0.0
+        window_vals = np.full((1, self.window), bpm, dtype=float)
+        X_scaled = self.scaler.transform(window_vals)
+        # Ignore the output; the call warms up internal caches/threads.
+        _ = self.model.predict(X_scaled)
 

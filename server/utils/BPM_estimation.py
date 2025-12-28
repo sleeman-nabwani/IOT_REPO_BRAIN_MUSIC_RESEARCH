@@ -1,11 +1,12 @@
 import time
+import threading
 from .midi_player import MidiBeatSync
 from .logger import Logger
 from .LGBM_predictor import LGBMPredictor
 
 class BPM_estimation:
     def __init__(self, player: MidiBeatSync, logger: Logger, manual_mode: bool = False,
-                manual_bpm: float = None, knn_predictor: LGBMPredictor = None) -> None:
+                manual_bpm: float = None, prediction_model: LGBMPredictor = None) -> None:
         self.last_msg_time = time.time()
         self.player = player
         self.logger = logger
@@ -15,7 +16,10 @@ class BPM_estimation:
         self.smoothing_alpha_up = 0.025   # Smoothing when speeding up (Attack)
         self.smoothing_alpha_down = 0.025 # Smoothing when slowing down (Decay)
         self.step_count = 0 # Track number of steps for delayed start
-        self.knn_predictor = knn_predictor
+        self.prediction_model = prediction_model
+        self._warmup_done = threading.Event()
+        self._warmup_failed = False
+        self._warmup_thread = None
         
         # TARGET BPM: This is where we WANT to be.
         # The 'walkingBPM' is where we ARE currently.
@@ -25,6 +29,13 @@ class BPM_estimation:
         # Time-Based Smoothing
         self.last_update_time = time.time()
         self.last_gui_log_time = time.time()
+
+        # Warm-up the predictor off the main path to avoid first-step stall.
+        if self.prediction_model:
+            self._warmup_thread = threading.Thread(
+                target=self._run_warmup, args=(player.walkingBPM,), daemon=True
+            )
+            self._warmup_thread.start()
 
     # Added this in order to change the smoothing factor at runtime:
     # Added this in order to change the smoothing factor at runtime:
@@ -63,13 +74,24 @@ class BPM_estimation:
         self.last_msg_time = time.time() # Reset the decay timer
         self.step_count += 1
         
-        # Prediction model (currently LightGBM predictor)
-        if self.knn_predictor:
-            self.knn_predictor.add_step(new_bpm)
-            predicted_bpm = self.knn_predictor.predict_next()
-            print(f"[Prediction] Next BPM: {predicted_bpm}")
-            if predicted_bpm is not None:
-                self.target_bpm = predicted_bpm*0.7 + new_bpm*0.3
+        # Prediction model (LightGBM) — only after warmup completes.
+        if self.prediction_model and self._warmup_done.is_set() and not self._warmup_failed:
+            try:
+                self.prediction_model.add_step(new_bpm)
+                pred = self.prediction_model.predict_next()
+                if pred is not None:
+                    # Blend to avoid sudden jumps while still using fresh prediction.
+                    self.target_bpm = float(pred) * 0.4 + new_bpm * 0.6
+            except Exception:
+                pass
+
+    def _run_warmup(self, initial_bpm: float | None):
+        try:
+            self.prediction_model.warmup(initial_bpm)
+        except Exception:
+            self._warmup_failed = True
+        finally:
+            self._warmup_done.set()
 
 
     def update_recorded_values(self,last_msg_time: float, last_recorded_bpm: float):

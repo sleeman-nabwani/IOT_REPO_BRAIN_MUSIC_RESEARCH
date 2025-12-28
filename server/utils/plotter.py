@@ -79,6 +79,12 @@ def save_static_plot(df, folder):
 
     # Drop invalid rows to prevent plotting errors
     df.dropna(subset=["seconds", "walking_bpm", "song_bpm"], inplace=True)
+    # Ensure chronological order (engine may emit out-of-order timestamps)
+    try:
+        df.sort_values("seconds", inplace=True, kind="mergesort")
+        df.reset_index(drop=True, inplace=True)
+    except Exception:
+        pass
 
     nan_value = float("nan")
     df["walking_plot"] = pd.to_numeric(df["walking_bpm"], errors='coerce')
@@ -335,6 +341,16 @@ class LivePlotter:
         w = w[valid_mask].reset_index(drop=True)
         s = s[valid_mask].reset_index(drop=True)
         step_events = step_events[valid_mask].reset_index(drop=True)
+
+        # Ensure monotonic time for plotting (handles out-of-order packets)
+        try:
+            order = t.argsort(kind="mergesort")
+            t = t.iloc[order].reset_index(drop=True)
+            w = w.iloc[order].reset_index(drop=True)
+            s = s.iloc[order].reset_index(drop=True)
+            step_events = step_events.iloc[order].reset_index(drop=True)
+        except Exception:
+            pass
         
         if len(t) == 0:
             return
@@ -455,6 +471,19 @@ class LivePlotter:
         t = pd.to_numeric(df["seconds"], errors='coerce')
         w = pd.to_numeric(df["walking_bpm"], errors='coerce')
         step_events = df["step_event"].copy() if "step_event" in df.columns else pd.Series([False]*len(df))
+
+        # Ensure monotonic time for final connected line
+        try:
+            valid_mask = t.notna()
+            t = t[valid_mask].reset_index(drop=True)
+            w = w[valid_mask].reset_index(drop=True)
+            step_events = step_events[valid_mask].reset_index(drop=True)
+            order = t.argsort(kind="mergesort")
+            t = t.iloc[order].reset_index(drop=True)
+            w = w.iloc[order].reset_index(drop=True)
+            step_events = step_events.iloc[order].reset_index(drop=True)
+        except Exception:
+            pass
         
         # Mask & Interpolate (Connect dots, NO trailing line)
         w_smooth = w.where(step_events, float("nan"))

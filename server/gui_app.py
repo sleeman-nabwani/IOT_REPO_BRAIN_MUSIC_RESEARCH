@@ -4,9 +4,6 @@ from pathlib import Path
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 import time
-import json
-import traceback
-
 
 import pandas as pd
 from matplotlib.figure import Figure
@@ -26,25 +23,6 @@ try:
     SERIAL_AVAILABLE = True
 except ImportError:
     SERIAL_AVAILABLE = False
-
-# region agent log
-_DEBUG_LOG_PATH = r"c:\Users\sleem\Desktop\Technion\semester_9\IOT\IOT_REPO_BRAIN_MUSIC_RESEARCH\.cursor\debug.log"
-def _dbg(runId: str, hypothesisId: str, location: str, message: str, data: dict | None = None):
-    payload = {
-        "sessionId": "debug-session",
-        "runId": runId,
-        "hypothesisId": hypothesisId,
-        "location": location,
-        "message": message,
-        "data": data or {},
-        "timestamp": int(time.time() * 1000),
-    }
-    try:
-        with open(_DEBUG_LOG_PATH, "a", encoding="utf-8") as f:
-            f.write(json.dumps(payload, ensure_ascii=False) + "\n")
-    except Exception:
-        pass
-# endregion
 
 # ==================================================================================
 # GUI APPLICATION
@@ -126,7 +104,6 @@ class GuiApp:
         self._did_tight_layout = True
         self.is_running = False
         self.is_app_active = True
-        
         # Poll jobs
         self.job_status = None
         self.job_dir = None
@@ -134,15 +111,6 @@ class GuiApp:
         self.job_ports = None
         
         self.port_scan_thread = None
-
-        # region agent log
-        self._dbg_run_id = f"run_{int(time.time() * 1000)}"
-        self._dbg_data_seen = 0
-        self._dbg_slow_plot_count = 0
-        self._dbg_exception_count = 0
-        self._dbg_slow_status_count = 0
-        self._dbg_first_step_logged = False
-        # endregion
 
 
 
@@ -491,15 +459,6 @@ class GuiApp:
         """Action for the 'START SESSION' button."""
         if self.is_running: return
 
-        # region agent log
-        self._dbg_run_id = f"run_{int(time.time() * 1000)}"
-        self._dbg_data_seen = 0
-        self._dbg_slow_plot_count = 0
-        self._dbg_exception_count = 0
-        self._dbg_slow_status_count = 0
-        self._dbg_first_step_logged = False
-        # endregion
-        
         # Clear any leftover live data/plot from previous session
         self.live_data_buffer = []
         while not self.data_queue.empty():
@@ -558,20 +517,6 @@ class GuiApp:
             val = self.smoothing_down_var.get().strip()
             if val: ad = float(val)
         except: pass
-
-        # region agent log
-        try:
-            self._dbg_data_seen = 0
-            _dbg(
-                self._dbg_run_id,
-                "C",
-                "server/gui_app.py:start_session",
-                "Starting session",
-                {"port": port, "manual": mm, "manual_bpm": mb, "window": sw, "stride": st, "session_name": s_name},
-            )
-        except Exception:
-            pass
-        # endregion
 
         # Create and start the Subprocess Manager
         self.session_thread = SubprocessManager(
@@ -950,62 +895,15 @@ class GuiApp:
     def enqueue_status(self, m): self.status_queue.put(m)
     def enqueue_session_dir(self, p):
         self.session_dir_queue.put(p)
-        # region agent log
-        try:
-            _dbg(self._dbg_run_id, "B", "server/gui_app.py:enqueue_session_dir", "SESSION_DIR received", {"path": str(p)})
-        except Exception:
-            pass
-        # endregion
     def enqueue_data(self, d):
         self.data_queue.put(d)
-        # region agent log
-        try:
-            self._dbg_data_seen += 1
-            if self._dbg_data_seen <= 3:
-                _dbg(
-                    self._dbg_run_id,
-                    "A",
-                    "server/gui_app.py:enqueue_data",
-                    "First DATA_PACKET received",
-                    {"n": self._dbg_data_seen, "t": d.get("t"), "s": d.get("s"), "w": d.get("w"), "e": d.get("e")},
-                )
-            if (not self._dbg_first_step_logged) and bool(d.get("e")):
-                self._dbg_first_step_logged = True
-                _dbg(
-                    self._dbg_run_id,
-                    "A",
-                    "server/gui_app.py:enqueue_data",
-                    "First STEP packet received",
-                    {"t": d.get("t"), "s": d.get("s"), "w": d.get("w"), "e": d.get("e")},
-                )
-        except Exception:
-            pass
-        # endregion
     
     def poll_status(self):
         """Checks for new status messages every 200ms."""
         if not self.is_app_active: return
-        # region agent log
-        t0 = time.perf_counter()
-        count = 0
-        # endregion
 
         while not self.status_queue.empty():
             self.log(self.status_queue.get_nowait())
-            count += 1
-
-        # region agent log
-        dt_ms = (time.perf_counter() - t0) * 1000
-        if (count > 30 or dt_ms > 40) and self._dbg_slow_status_count < 10:
-            self._dbg_slow_status_count += 1
-            _dbg(
-                self._dbg_run_id,
-                "E",
-                "server/gui_app.py:poll_status",
-                "Heavy status processing",
-                {"count": count, "dt_ms": dt_ms},
-            )
-        # endregion
         self.job_status = self.root.after(200, self.poll_status)
         
     def poll_session_dir(self):
@@ -1066,11 +964,8 @@ class GuiApp:
         """
         Reads from RAM Buffer (Fast!) instead of Disk CSV.
         """
-        # region agent log
-        t0 = time.perf_counter()
         stage = "drain"
         df = None
-        # endregion
 
         new_data_count = 0
         try:
@@ -1100,7 +995,13 @@ class GuiApp:
                  df["seconds"] = df["time"].apply(_elapsed_to_seconds)
             else:
                  df["seconds"] = df.index
-            
+
+            # Ensure time ordering for plotting (engine can emit out-of-order timestamps)
+            try:
+                df = df.sort_values("seconds", kind="mergesort").reset_index(drop=True)
+            except Exception:
+                pass
+
             # Ensure boolean
             if "step_event" in df.columns:
                  # It comes as boolean from JSON, but just in case
@@ -1151,51 +1052,10 @@ class GuiApp:
                 pass
 
         except Exception as e:
-            # region agent log
-            try:
-                if self._dbg_exception_count < 10:
-                    self._dbg_exception_count += 1
-                    _dbg(
-                        self._dbg_run_id,
-                        "A",
-                        "server/gui_app.py:refresh_plot",
-                        "Exception in refresh_plot",
-                        {
-                            "stage": stage,
-                            "error": repr(e),
-                            "traceback": traceback.format_exc()[-1500:],
-                            "new_data_count": new_data_count,
-                            "buf_len": len(self.live_data_buffer),
-                            "df_len": (len(df) if df is not None else None),
-                        },
-                    )
-            except Exception:
-                pass
-            # endregion
             print(f"Plot Error ({stage}): {e}")
             return
         finally:
-            # region agent log
-            try:
-                dt_ms = (time.perf_counter() - t0) * 1000
-                if dt_ms > 60 and self._dbg_slow_plot_count < 10:
-                    self._dbg_slow_plot_count += 1
-                    _dbg(
-                        self._dbg_run_id,
-                        "D",
-                        "server/gui_app.py:refresh_plot",
-                        "Slow refresh_plot frame",
-                        {
-                            "dt_ms": dt_ms,
-                            "stage": stage,
-                            "new_data_count": new_data_count,
-                            "buf_len": len(self.live_data_buffer),
-                            "df_len": (len(df) if df is not None else None),
-                        },
-                    )
-            except Exception:
-                pass
-            # endregion
+            pass
 
     def update_plot_options(self):
         """Callback for the 2x/0.5x BPM checkboxes."""
