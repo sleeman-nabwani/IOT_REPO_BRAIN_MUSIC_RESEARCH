@@ -29,7 +29,7 @@ Launch the application using the start script:
 - **Linux/Mac:** Run `start_app.sh`
 
 
-**System Diagram:**
+**System Overview:**
 
 <img width="800" height="400" alt="image" src="https://github.com/user-attachments/assets/991cdfc8-dc72-4c4c-866a-1f1403c760b4" />
 
