@@ -197,8 +197,8 @@ class BPM_estimation:
                 self.last_gui_log_time = now_ts
             return
         
-                    # 3. Decay Logic (If user stops walking)
-                    interval = now_ts - self.last_msg_time
+        # 3. Decay Logic (If user stops walking)
+        interval = now_ts - self.last_msg_time
         if interval > 0:
             decay_limit = 60 / interval
             if decay_limit < self.target_bpm:
