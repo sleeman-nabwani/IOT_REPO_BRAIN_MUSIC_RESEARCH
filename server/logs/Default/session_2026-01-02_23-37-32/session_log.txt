@@ -1,0 +1,6 @@
+Session log started at 2026-01-02_23-37-32 (t=0.000)
+[00:00:00.004] DEBUG: Attempting to initialize MidiBeatSync...
+[00:00:00.837] DEBUG: MidiBeatSync initialized successfully.
+[00:00:00.842] Starting in RANDOM DRIFT MODE.
+[00:00:00.842] Run type: random
+[00:00:02.989] Prediction model enabled (LightGBM)

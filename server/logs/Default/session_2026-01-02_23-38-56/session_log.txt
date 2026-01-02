@@ -1,0 +1,26 @@
+Session log started at 2026-01-02_23-38-56 (t=0.000)
+[00:00:00.004] DEBUG: Attempting to initialize MidiBeatSync...
+[00:00:00.926] DEBUG: MidiBeatSync initialized successfully.
+[00:00:00.927] Starting in RANDOM DRIFT MODE.
+[00:00:00.928] Run type: random
+[00:00:02.828] Prediction model enabled (LightGBM)
+[00:00:02.829] Random Mode ENABLED (100-140 BPM)
+[00:00:02.829] Session started
+[00:00:02.831] DEBUG: Attempting to open serial port COM5...
+[00:00:02.895] DEBUG: Serial port COM5 opened successfully.
+[00:00:03.397] Setting update stride to 1
+[00:00:03.500] Update stride set response: ACK,STRIDE,1
+[00:00:03.605] ACK,RESET received
+[00:00:03.707] ACK,START received
+[00:00:03.709] Session handshake completed
+[00:00:03.726] Running main loop...
+[00:00:03.737] RANDOM: New Target 82.4 (Base: 80.0 ±16.0)
+[00:00:03.737] BPM sliding: 80.00 -> 81.34 (Target: 82.37)
+[00:00:10.236] RANDOM: New Target 82.0 (Base: 80.0 ±16.0)
+[00:00:13.909] RANDOM: New Target 65.0 (Base: 80.0 ±16.0)
+[00:00:17.830] RANDOM: New Target 78.0 (Base: 80.0 ±16.0)
+[00:00:23.986] RANDOM: New Target 86.7 (Base: 80.0 ±16.0)
+[00:00:30.800] RANDOM: New Target 73.2 (Base: 80.0 ±16.0)
+[00:00:37.880] RANDOM: New Target 87.8 (Base: 80.0 ±16.0)
+[00:00:45.200] RANDOM: New Target 85.4 (Base: 80.0 ±16.0)
+[00:00:48.858] RANDOM: New Target 70.6 (Base: 80.0 ±16.0)
