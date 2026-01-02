@@ -55,6 +55,8 @@ struct Button {
   uint32_t tChange = 0;   // last raw change time
   uint32_t tPress = 0;    // 0 = not pressed, else press start time
   uint32_t tRepeat = 0;   // last repeat tick time
+
+  Button(int p) : pin(p) {}
 };
 
 Button buttonUp{UP_BUTTON};
@@ -98,7 +100,7 @@ void handleButton(Button &b, int8_t dir, uint32_t now) {
 
     Packet p{};
     p.type = MSG_BPM_DELTA;
-    p.bpm.delta = dir * 1;
+    p.BPM.delta = dir * 1;
     sendPacket(p);
     return;
   }
@@ -118,7 +120,7 @@ void handleButton(Button &b, int8_t dir, uint32_t now) {
 
       Packet p{};
       p.type = MSG_BPM_DELTA;
-      p.bpm.delta = dir * step;
+      p.BPM.delta = dir * step;
       sendPacket(p);
 
       b.tRepeat = now;
