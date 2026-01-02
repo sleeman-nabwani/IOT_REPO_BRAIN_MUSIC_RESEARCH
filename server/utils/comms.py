@@ -110,6 +110,12 @@ def handle_engine_command(cmd, ser, logger, bpm_estimation, player):
                     send_config_command(ser, logger, "SET_WINDOW", int(val), "steps window", "ACK,WINDOW")
                 elif key == "SET_STRIDE":
                     send_config_command(ser, logger, "SET_STRIDE", int(val), "update stride", "ACK,STRIDE")
+                elif key == "SET_RANDOM_SPAN":
+                     if hasattr(bpm_estimation, 'set_random_span'):
+                         bpm_estimation.set_random_span(float(val))
+                elif key == "SET_RANDOM_GAMIFIED":
+                     if hasattr(bpm_estimation, 'set_random_gamified'):
+                         bpm_estimation.set_random_gamified(int(val) == 1)
             except ValueError:
                 logger.log(f"Invalid command format: {cmd}")
         elif cmd == "QUIT":

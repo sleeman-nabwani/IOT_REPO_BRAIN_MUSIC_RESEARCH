@@ -91,6 +91,17 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Enable hybrid mode (starts dynamic, locks if steady)",
     )
+    parser.add_argument(
+        "--random",
+        action="store_true",
+        help="Enable Random Drift Mode",
+    )
+    parser.add_argument(
+        "--random-span",
+        type=float,
+        default=0.20,
+        help="Difficulty span for Random Mode (0.0-0.5)",
+    )
     return parser.parse_args()
 
 def start_stdin_listener(command_queue):
@@ -112,7 +123,15 @@ def main(args, status_callback=print, stop_event=None, session_dir_callback=None
     midi_path = args.midi_path
     smoothing_window = getattr(args, 'smoothing', 3)
     stride = getattr(args, 'stride', 1)
-    run_type = "manual" if args.manual else ("hybrid" if getattr(args, "hybrid", False) else "dynamic")
+    
+    if args.manual:
+        run_type = "manual"
+    elif getattr(args, "hybrid", False):
+        run_type = "hybrid"
+    elif getattr(args, "random", False):
+        run_type = "random"
+    else:
+        run_type = "dynamic"
 
     # 1. Initialize Logger 
     logger = Logger(
@@ -160,6 +179,8 @@ def main(args, status_callback=print, stop_event=None, session_dir_callback=None
             player.set_BPM(args.bpm)
         else:
             logger.log(f"Using default song BPM: {player.songBPM}")
+    elif getattr(args, "random", False):
+        logger.log("Starting in RANDOM DRIFT MODE.")
     else:
         logger.log("Starting in DYNAMIC MODE")
     logger.log(f"Run type: {run_type}")
@@ -184,6 +205,10 @@ def main(args, status_callback=print, stop_event=None, session_dir_callback=None
         run_type=run_type,
         hybrid_mode=getattr(args, 'hybrid', False),
     )
+
+    if getattr(args, "random", False):
+        if hasattr(bpm_estimation, 'set_random_mode'):
+             bpm_estimation.set_random_mode(True, span=getattr(args, 'random_span', 0.20))
     if args.alpha_up is not None:
         bpm_estimation.set_smoothing_alpha_up(args.alpha_up)
     if args.alpha_down is not None:

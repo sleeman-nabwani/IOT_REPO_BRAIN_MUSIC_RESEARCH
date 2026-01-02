@@ -276,9 +276,46 @@ class GuiApp:
         self.mode_var = tk.StringVar(value="dynamic")
         ttk.Radiobutton(sidebar, text="🧠 Dynamic", value="dynamic", variable=self.mode_var, command=self.on_mode_change).pack(anchor="w", pady=5)
         ttk.Radiobutton(sidebar, text="🚀 Hybrid (Cruise Control)", value="hybrid", variable=self.mode_var, command=self.on_mode_change).pack(anchor="w", pady=5)
+        ttk.Radiobutton(sidebar, text="🎲 Random Drift", value="random", variable=self.mode_var, command=self.on_mode_change).pack(anchor="w", pady=5)
         ttk.Radiobutton(sidebar, text="🛠 Manual Override", value="manual", variable=self.mode_var, command=self.on_mode_change).pack(anchor="w", pady=5)
+        
+        
+        # Dynamic Settings Wrapper (Maintains Layout Position)
+        self.dynamic_wrapper = ttk.Frame(sidebar)
+        self.dynamic_wrapper.pack(fill="x")
+        
+        # Dynamic Settings Container (Holds Random/Manual Frames)
+        self.dynamic_settings_container = ttk.Frame(self.dynamic_wrapper)
+        self.dynamic_settings_container.pack(fill="x")
+
+        # RANDOM GAME SETTINGS
+        self.random_settings_frame = ttk.Frame(self.dynamic_settings_container, style="Card.TFrame")
+        self.random_settings_frame.pack(fill="x", pady=5)
+        
+        ttk.Label(self.random_settings_frame, text="Difficulty (Span %)", style="CardHeader.TLabel").pack(anchor="w")
+        self.random_span_var = tk.DoubleVar(value=0.20)
+        
+        rnd_row = ttk.Frame(self.random_settings_frame, style="Card.TFrame")
+        rnd_row.pack(fill="x", pady=5)
+        
+        vcmd = (self.root.register(self.validate_number), '%P')
+        
+        self.rnd_val_str = tk.StringVar(value="0.20")
+        self.rnd_val_entry = ttk.Entry(rnd_row, textvariable=self.rnd_val_str, width=5, validate="key", validatecommand=vcmd)
+        self.rnd_val_entry.pack(side="right", padx=5)
+        self.rnd_val_entry.bind("<Return>", self.on_random_span_entry)
+        self.rnd_val_entry.bind("<FocusOut>", self.on_random_span_entry)
+        
+        self.rnd_slider = ttk.Scale(rnd_row, from_=0.05, to=0.50, orient="horizontal", 
+                                   variable=self.random_span_var, command=self.on_random_slider_change)
+        self.rnd_slider.pack(side="left", fill="x", expand=True, padx=5)
+
+        # Gamify Toggle
+        self.gamify_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(self.random_settings_frame, text="Gamified (Time Limit & Hold)", variable=self.gamify_var, command=self.on_gamify_toggle).pack(anchor="w", padx=5, pady=5)
+
         # MANUAL BPM
-        self.manual_bpm_frame = ttk.Frame(sidebar, style="Card.TFrame")
+        self.manual_bpm_frame = ttk.Frame(self.dynamic_settings_container, style="Card.TFrame")
         self.manual_bpm_frame.pack(fill="x", pady=10)
         
         ttk.Label(self.manual_bpm_frame, text="Target BPM", style="CardHeader.TLabel").pack(anchor="w")
@@ -289,8 +326,12 @@ class GuiApp:
         bpm_row = ttk.Frame(self.manual_bpm_frame, style="Card.TFrame")
         bpm_row.pack(fill="x", pady=5)
         
-        self.bpm_val_label = ttk.Label(bpm_row, text="100 BPM", style="Sub.TLabel", width=10)
-        self.bpm_val_label.pack(side="right", padx=5)
+        self.bpm_str = tk.StringVar(value="100")
+        self.bpm_entry = ttk.Entry(bpm_row, textvariable=self.bpm_str, width=6, validate="key", validatecommand=vcmd)
+        self.bpm_entry.pack(side="right", padx=5)
+        self.bpm_entry.bind("<Return>", self.on_bpm_entry)
+        self.bpm_entry.bind("<FocusOut>", self.on_bpm_entry)
+
 
         self.bpm_slider = ttk.Scale(bpm_row, from_=0, to=400, orient="horizontal", 
                                    variable=self.manual_bpm_var, command=self.on_bpm_slider_change)
@@ -451,50 +492,118 @@ class GuiApp:
     def on_bpm_slider_change(self, val):
         """Handle slider movement with real-time update."""
         bpm = float(val)
-        self.bpm_val_label.configure(text=f"{int(bpm)} BPM")
+        self.bpm_str.set(f"{int(bpm)}")
         
         # If in manual mode and running, update immediately
         if self.mode_var.get() == "manual":
             if self.session_thread: 
                 self.session_thread.update_manual_bpm(bpm)
-            # We don't log every single slide event to avoid spam, 
-            # maybe just update label.
+            # We don't log every single slide event to avoid spam
+
+    def on_bpm_entry(self, event=None):
+        """Handle BPM entry."""
+        try:
+             bpm = float(self.bpm_str.get())
+             bpm = max(0, min(400, bpm))
+             self.manual_bpm_var.set(bpm)
+             self.on_bpm_slider_change(bpm)
+        except ValueError:
+             self.bpm_str.set(f"{int(self.manual_bpm_var.get())}")
+            
+    def on_random_slider_change(self, val):
+        """Update entry and backend when slider moves."""
+        span = float(val)
+        self.rnd_val_str.set(f"{span:.2f}")
+        
+        if self.mode_var.get() == "random" and self.session_thread:
+             self.session_thread.update_random_span(span)
+
+    def on_gui_sync(self, key, value):
+        """Called by SubprocessManager when backend sends a sync packet."""
+        try:
+            if key == "MANUAL_BPM":
+                bpm = float(value)
+                # Update without triggering another command (idempotent anyway)
+                self.manual_bpm_var.set(bpm)
+                self.bpm_str.set(f"{int(bpm)}")
+                # If we were using the slider value directly for display, we're good.
+        except: pass
+
+    def on_random_span_entry(self, event=None):
+        """Update slider and backend when entry changes."""
+        try:
+             span = float(self.rnd_val_str.get())
+             # Clamp
+             span = max(0.05, min(0.50, span))
+             
+             self.random_span_var.set(span) # Move slider
+             self.rnd_val_str.set(f"{span:.2f}") # Format nicely
+             
+             if self.mode_var.get() == "random" and self.session_thread:
+                 self.session_thread.update_random_span(span)
+        except ValueError:
+             # Reset to slider value if invalid
+             self.rnd_val_str.set(f"{self.random_span_var.get():.2f}")
             
     def get_selected_port(self):
         val = self.port_var.get() if not SERIAL_AVAILABLE else self.port_combo.get()
         return val.split(" - ")[0] if " - " in val else val
 
+    def validate_number(self, new_value):
+        """Allow only numeric input."""
+        if new_value == "": return True
+        try:
+            float(new_value)
+            return True
+        except ValueError:
+            return False
+
+    def _set_frame_state(self, frame, state):
+        """Recursively set state for all widgets in a frame."""
+        try: frame.configure(state=state)
+        except: pass
+        for child in frame.winfo_children():
+            try: child.configure(state=state)
+            except: pass
+            # Recurse for nested frames
+            if isinstance(child, ttk.Frame):
+                self._set_frame_state(child, state)
+
     def on_mode_change(self):
         m = self.mode_var.get()
+        
+        # Ensure container is always visible
+        self.dynamic_settings_container.pack(fill="x")
+        
+        # 1. Random Mode State
+        rnd_state = "normal" if m == "random" else "disabled"
+        self._set_frame_state(self.random_settings_frame, rnd_state)
+        
+        # 2. Manual Mode State
+        manual_state = "normal" if m == "manual" else "disabled"
+        self._set_frame_state(self.manual_bpm_frame, manual_state)
+        
         if m == "manual":
-            # Enable BPM controls
-            for child in self.manual_bpm_frame.winfo_children():
-                try: child.configure(state="normal")
-                except: pass
-            # Also the inner frames
-            for child in self.manual_bpm_frame.winfo_children():
-                if isinstance(child, ttk.Frame):
-                    for gc in child.winfo_children():
-                         try: gc.configure(state="normal")
-                         except: pass
-            
             if self.session_thread: self.session_thread.set_manual_mode(True)
+            # Apply current BPM immediately if switching to manual
+            val = self.manual_bpm_var.get()
+            self.on_bpm_slider_change(val)
             
-            # Apply current BPM
-            self.on_bpm_slider_change(self.manual_bpm_var.get())
-            
+        elif m == "random":
+             if self.session_thread: self.session_thread.set_manual_mode(False)
+             # Apply random span & gamify
+             val = self.random_span_var.get()
+             if self.session_thread: 
+                 self.session_thread.update_random_span(val)
+                 self.session_thread.update_random_gamified(self.gamify_var.get())
+        
         else:
-            # Disable BPM controls
-            for child in self.manual_bpm_frame.winfo_children():
-                 try: child.configure(state="disabled")
-                 except: pass
-            for child in self.manual_bpm_frame.winfo_children():
-                if isinstance(child, ttk.Frame):
-                    for gc in child.winfo_children():
-                         try: gc.configure(state="disabled")
-                         except: pass
-            
-            if self.session_thread: self.session_thread.set_manual_mode(False)
+             if self.session_thread: self.session_thread.set_manual_mode(False)
+             
+    def on_gamify_toggle(self):
+        """Called when gamify checkbox is toggled."""
+        if self.mode_var.get() == "random" and self.session_thread:
+            self.session_thread.update_random_gamified(self.gamify_var.get())
 
     def start_session(self):
         """Action for the 'START SESSION' button."""
@@ -576,7 +685,14 @@ class GuiApp:
             alpha_up=au,
             alpha_down=ad,
             hybrid_mode=(self.mode_var.get() == "hybrid"),
+            random_mode=(self.mode_var.get() == "random"),
+            random_span=self.random_span_var.get(),
+            gui_sync_callback=self.on_gui_sync,
         )
+        
+        # If Random Mode is active, ensuring Gamify State is synced
+        if self.mode_var.get() == "random":
+             self.session_thread.update_random_gamified(self.gamify_var.get())
         
         # Update UI state
         self.is_running = True

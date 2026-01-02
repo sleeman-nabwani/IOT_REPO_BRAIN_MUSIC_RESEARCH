@@ -12,10 +12,11 @@ class SubprocessManager:
     - Writes commands to its STDIN.
     - Reads logs from its STDOUT.
     """
-    def __init__(self, midi_path, serial_port, manual_mode, manual_bpm, smoothing_window, stride, log_callback, session_dir_callback, data_callback=None, session_name=None, alpha_up=None, alpha_down=None, hybrid_mode=False):
+    def __init__(self, midi_path, serial_port, manual_mode, manual_bpm, smoothing_window, stride, log_callback, session_dir_callback, data_callback=None, gui_sync_callback=None, session_name=None, alpha_up=None, alpha_down=None, hybrid_mode=False, random_mode=False, random_span=None):
         self.log_callback = log_callback
         self.session_dir_callback = session_dir_callback
         self.data_callback = data_callback
+        self.gui_sync_callback = gui_sync_callback
         self.process = None
         self.running = False
         
@@ -48,6 +49,11 @@ class SubprocessManager:
         
         if hybrid_mode:
             cmd.append("--hybrid")
+
+        if random_mode:
+            cmd.append("--random")
+            if random_span:
+                cmd.extend(["--random-span", str(random_span)])
         
         # Launch Process
         try:
@@ -119,6 +125,17 @@ class SubprocessManager:
                              self.data_callback(data)
                          except: pass
                      continue
+                
+                # Check for GUI Sync Packet
+                if line.startswith("GUI_SYNC:"):
+                    if self.gui_sync_callback:
+                        try:
+                            # Format: GUI_SYNC:KEY:VALUE
+                            parts = line.split(":", 2)
+                            if len(parts) == 3:
+                                self.gui_sync_callback(parts[1], parts[2])
+                        except: pass
+                    continue
 
                 if line == "EXIT_CLEAN":
                     self.running = False
@@ -156,6 +173,13 @@ class SubprocessManager:
             self.send_command(f"SET_WINDOW:{value}")
         elif cmd_type == "stride":
             self.send_command(f"SET_STRIDE:{value}")
+
+    def update_random_span(self, span):
+        self.send_command(f"SET_RANDOM_SPAN:{span}")
+
+    def update_random_gamified(self, enabled: bool):
+        val = 1 if enabled else 0
+        self.send_command(f"SET_RANDOM_GAMIFIED:{val}")
 
     def stop(self):
         self.running = False
