@@ -14,7 +14,14 @@ def _format_elapsed(seconds: float) -> str:
 class Logger:
     # NOTE: This logger is used both for the console and for the GUI.
     #       It is initialized with a GUI callback if available.
-    def __init__(self, gui_callback=None, session_name=None, smoothing_window: int | None = None, stride: int | None = None):
+    def __init__(
+        self,
+        gui_callback=None,
+        session_name=None,
+        smoothing_window: int | None = None,
+        stride: int | None = None,
+        run_type: str | None = None,
+    ):
         self.start_time = time.time()
         self.timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         self.gui_callback = gui_callback
@@ -41,6 +48,7 @@ class Logger:
         meta = {
             "smoothing_window": int(smoothing_window) if smoothing_window is not None else 3,
             "stride": int(stride) if stride is not None else 1,
+            "run_type": run_type if run_type is not None else "dynamic",
         }
         with self.csv_path.open("w", newline="", encoding="utf-8") as handle:
             handle.write(f"# meta: {json.dumps(meta)}\n")

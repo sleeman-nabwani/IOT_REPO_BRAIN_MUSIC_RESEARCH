@@ -88,7 +88,7 @@ TUNED_PARAMS = dict(
 
 
 def _prepare_dataset():
-    """Load, validate, and split data; returns scaled matrices and scaler."""
+    """Load, validate, and split data; returns scaled matrices, scaler, and meta mappings."""
     logs_dir = BASE_DIR / "server" / "logs"
     raw_df, df = get_raw_and_processed_sessions(logs_dir)
     if raw_df.empty:
@@ -99,7 +99,7 @@ def _prepare_dataset():
         print("No valid walking_bpm values after filtering.")
         return None
 
-    X_lag, y, meta = build_lag_features(df, window_size=WINDOW_SIZE)
+    X_lag, y, meta, meta_mappings = build_lag_features(df, window_size=WINDOW_SIZE)
     if len(X_lag) < 20:
         print(f"Not enough sequences to train (found {len(X_lag)}).")
         return None
@@ -119,7 +119,7 @@ def _prepare_dataset():
     X_train = scaler.fit_transform(X_train)
     X_test = scaler.transform(X_test)
 
-    return X_train, X_test, y_train, y_test, scaler
+    return X_train, X_test, y_train, y_test, scaler, meta_mappings
 
 
 def _plot_predictions(tag, y_true, preds, mae, r2, limit=200):
@@ -143,7 +143,7 @@ def train_lgbm_model():
     if prepared is None:
         return
 
-    X_train, X_test, y_train, y_test, scaler = prepared
+    X_train, X_test, y_train, y_test, scaler, meta_mappings = prepared
 
     def train_and_eval(params, tag):
         model = lgb.LGBMRegressor(**params)
@@ -183,10 +183,11 @@ def train_lgbm_model():
                 "walking": WINDOW_SIZE,
                 "instant": WINDOW_SIZE,
             },
-            "extra": ["smoothing_window", "stride"],
+            "extra": ["smoothing_window", "stride", "run_type"],
+            "run_type_mapping": meta_mappings.get("run_type") if meta_mappings else None,
             "order": ([f"walk_lag_{i}" for i in range(WINDOW_SIZE)] +
                       [f"inst_lag_{i}" for i in range(WINDOW_SIZE)] +
-                      ["smoothing_window", "stride"]),
+                      ["smoothing_window", "stride", "run_type"]),
         },
     }
     model_path = MODELS_DIR / "lgbm_model.joblib"
@@ -210,7 +211,7 @@ def optimize_lgbm_model(trials: int = DEFAULT_OPTUNA_TRIALS, timeout: Optional[i
     if prepared is None:
         return
 
-    X_train, X_test, y_train, y_test, scaler = prepared
+    X_train, X_test, y_train, y_test, scaler, meta_mappings = prepared
     X_train_opt, X_val_opt, y_train_opt, y_val_opt = train_test_split(
         X_train, y_train, test_size=0.2, random_state=RANDOM_SEED
     )
@@ -307,10 +308,11 @@ def optimize_lgbm_model(trials: int = DEFAULT_OPTUNA_TRIALS, timeout: Optional[i
                 "walking": WINDOW_SIZE,
                 "instant": WINDOW_SIZE,
             },
-            "extra": ["smoothing_window", "stride"],
+            "extra": ["smoothing_window", "stride", "run_type"],
+            "run_type_mapping": meta_mappings.get("run_type") if meta_mappings else None,
             "order": ([f"walk_lag_{i}" for i in range(WINDOW_SIZE)] +
                       [f"inst_lag_{i}" for i in range(WINDOW_SIZE)] +
-                      ["smoothing_window", "stride"]),
+                      ["smoothing_window", "stride", "run_type"]),
         },
     }
     model_path = MODELS_DIR / "lgbm_model.joblib"
@@ -359,7 +361,7 @@ def train_user_calibration(user_df, base_model_path=None, output_suffix="user_he
         raise ValueError("No valid user data after filtering.")
 
     # Build lag features
-    X_lag, y, meta = build_lag_features(user_df, window_size=window_size)
+    X_lag, y, meta, _ = build_lag_features(user_df, window_size=window_size)
     if len(X_lag) < 10:
         raise ValueError(f"Not enough user sequences to fit calibration head (found {len(X_lag)}).")
     X = np.concatenate([X_lag, meta], axis=1) if len(meta) > 0 else X_lag

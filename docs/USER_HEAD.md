@@ -43,7 +43,8 @@ window = base["window_size"]
 calibrator = head["calibrator"]
 
 # df_user_new must contain walking_bpm and session_id
-X, _ = build_lag_features(df_user_new, window)
+X_lag, _, meta, _ = build_lag_features(df_user_new, window)
+X = np.concatenate([X_lag, meta], axis=1)
 X_scaled = scaler.transform(X)
 base_preds = base_model.predict(X_scaled)
 features = np.column_stack([base_preds, X_scaled])

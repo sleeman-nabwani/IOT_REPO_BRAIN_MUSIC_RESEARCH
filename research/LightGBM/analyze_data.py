@@ -106,7 +106,8 @@ def build_lag_features(df: pd.DataFrame, window_size: int):
     """
     Create sliding window lag features for one-step-ahead prediction.
     Uses both smoothed walking_bpm and per-step instant_bpm, and carries
-    session-level meta (smoothing_window, stride).
+    session-level meta (smoothing_window, stride, run_type).
+    Returns (X_lag, y, meta, meta_mappings).
     """
     sequences, targets, metas = [], [], []
 
@@ -115,6 +116,15 @@ def build_lag_features(df: pd.DataFrame, window_size: int):
         return float(parts[0]) * 3600 + float(parts[1]) * 60 + float(parts[2])
 
     df = df.copy()
+    # Encode run_type (dynamic/manual/hybrid) as numeric
+    if "run_type" in df.columns:
+        df["run_type"] = df["run_type"].fillna("dynamic").astype(str)
+        run_type_labels = sorted(df["run_type"].unique())
+        run_type_mapping = {label: float(idx) for idx, label in enumerate(run_type_labels)}
+        df["_run_type_code"] = df["run_type"].map(run_type_mapping).astype(float)
+    else:
+        run_type_mapping = {"dynamic": 0.0}
+        df["_run_type_code"] = 0.0
     if "time" in df.columns:
         try:
             df["seconds"] = df["time"].apply(_to_seconds)
@@ -154,18 +164,20 @@ def build_lag_features(df: pd.DataFrame, window_size: int):
 
         sw = g["smoothing_window"].iloc[0] if "smoothing_window" in g else 3
         st = g["stride"].iloc[0] if "stride" in g else 1
+        run_type_code = g["_run_type_code"].iloc[0] if "_run_type_code" in g else 0.0
         for idx in range(window_size, len(walk_vals)):
             walk_slice = walk_vals[idx - window_size : idx]
             inst_slice = inst_vals[idx - window_size : idx]
             sequences.append(list(walk_slice) + list(inst_slice))
             targets.append(walk_vals[idx])
-            metas.append([sw, st])
+            metas.append([sw, st, run_type_code])
     if not sequences:
-        return np.array([]), np.array([]), np.array([])
+        return np.array([]), np.array([]), np.array([]), {"run_type": run_type_mapping}
     return (
         np.array(sequences, dtype=np.float32),
         np.array(targets, dtype=np.float32),
         np.array(metas, dtype=np.float32),
+        {"run_type": run_type_mapping},
     )
 
 
