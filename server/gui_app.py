@@ -6,8 +6,6 @@ from tkinter import ttk, filedialog, messagebox
 import time
 
 import pandas as pd
-import webbrowser
-import serial.tools.list_ports
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
@@ -78,6 +76,8 @@ class GuiApp:
             "danger": "#ef4444", "success": "#22c55e", "warning": "#eab308",
             "border": "#334155",
         }
+        # TWEAK: To change the background color, edit "bg" above.
+        # TWEAK: To change the button color, edit "accent" above.
         root.configure(bg=self.P["bg"])
 
         # --- STYLE SETUP ---
@@ -131,7 +131,6 @@ class GuiApp:
         # Sliding window controls
         self.view_window_sec = 240  # visible time window for live plot
         self.buffer_cap = 30000     # absolute cap to avoid unbounded growth
-
         # Live plot uses subplots_adjust; avoid tight_layout in the hot path for FPS stability.
         self._did_tight_layout = True
         self.is_running = False
@@ -442,16 +441,12 @@ class GuiApp:
     def get_midi_files(self):
         """Scans midi_files/ directory."""
         try:
-            base_dir = Path(__file__).resolve().parent.parent / "midi_files"
-            if not base_dir.exists(): return []
-            return [f.name for f in base_dir.glob("*.mid")]
+            return [f.name for f in Path(__file__).resolve().parent.parent.joinpath("midi_files").glob("*.mid")]
         except: return []
 
     def refresh_midi_list(self):
-        vals = self.get_midi_files()
-        self.midi_combo['values'] = vals
-        if vals and not self.midi_var.get():
-             self.midi_combo.current(0)
+        self.midi_combo['values'] = self.get_midi_files()
+        if self.midi_combo['values']: self.midi_combo.current(0)
     
     def on_bpm_slider_change(self, val):
         """Handle slider movement with real-time update."""
@@ -624,7 +619,7 @@ class GuiApp:
         self.midi_combo['values'] = vals
         if vals and not self.midi_var.get():
              self.midi_combo.current(0)
-    
+
     def get_existing_sessions(self):
         """
         Scans logs/ for custom session names (folders).
@@ -1008,54 +1003,100 @@ class GuiApp:
 
     def refresh_plot(self):
         """
-        Reads from Data Queue -> Updates RAM Buffer -> Updates Plot.
-        Uses Pandas for consistent plotting logic (same as post-session).
+        Reads from RAM Buffer (Fast!) instead of Disk CSV.
         """
+        stage = "drain"
+        df = None
+
+        new_data_count = 0
         try:
             # 1. Drain Queue into RAM Buffer
             while not self.data_queue.empty():
-                item = self.data_queue.get_nowait()
-                # Helper: convert time string to seconds immediately
-                try:
-                    s = _elapsed_to_seconds(item['t'])
-                except:
-                    continue
-                    
-                # Append dict
-                row = {
-                    "seconds": s,
-                    "walking_bpm": float(item['w']) if item['w'] is not None else float("nan"),
-                    "song_bpm": float(item['s']) if item['s'] is not None else float("nan"),
-                    "step_event": bool(item['e'])
-                }
-                self.live_data_buffer.append(row)
-
-            if not self.live_data_buffer:
+                self.live_data_buffer.append(self.data_queue.get_nowait())
+                new_data_count += 1
+            
+            # Hard cap to prevent unbounded growth
+            stage = "cap"
+            if len(self.live_data_buffer) > self.buffer_cap:
+                self.live_data_buffer = self.live_data_buffer[-self.buffer_cap:]
+                
+            if not self.live_data_buffer or new_data_count == 0:
                 return
 
-            # Cap buffer size to prevent memory explosion if running for days
-            if len(self.live_data_buffer) > self.buffer_cap:
-                # Keep last N points
-                self.live_data_buffer = self.live_data_buffer[-self.buffer_cap:]
-
-            # 2. Convert to DataFrame (Only recent slice if buffer is huge?)
-            # Plotter expects a DataFrame.
-            # Optimization: pass only the last N points to the plotter to keep it fast?
-            # Plotter.update() has internal downsampling, but creating a DF from 50k items is slow.
-            # So let's pass a slick.
+            # 2. Convert to DataFrame (OPTIMIZED: Only process the tail!)
+            stage = "dataframe"
+            points_to_process = self.live_data_buffer[-8000:]
+            df = pd.DataFrame(points_to_process)
             
-            subset = self.live_data_buffer
-            if len(subset) > self.max_live_points:
-                 subset = subset[-self.max_live_points:]
+            # Rename match plotter expectations
+            # Packet keys: t=time_str, s=song, w=walking, e=event
+            df.rename(columns={"t": "time", "s": "song_bpm", "w": "walking_bpm", "e": "step_event"}, inplace=True)
             
-            df = pd.DataFrame(subset)
-            if df.empty: return
+            if "time" in df.columns:
+                 df["seconds"] = df["time"].apply(_elapsed_to_seconds)
+            else:
+                 df["seconds"] = df.index
 
-            # 3. Update Plot
+            # Ensure time ordering for plotting (engine can emit out-of-order timestamps)
+            try:
+                df = df.sort_values("seconds", kind="mergesort").reset_index(drop=True)
+            except Exception:
+                pass
+
+            # Ensure boolean
+            if "step_event" in df.columns:
+                 # It comes as boolean from JSON, but just in case
+                 df["step_event"] = df["step_event"].astype(bool)
+
+            # Early exit if conversion failed
+            if df.empty:
+                return
+
+            # Sliding time window: keep only recent seconds
+            stage = "window"
+            tmax = df["seconds"].max()
+            if pd.isna(tmax):
+                return
+
+            window_start = tmax - self.view_window_sec
+            keep_mask = df["seconds"] >= window_start
+            if not keep_mask.all():
+                df = df[keep_mask].reset_index(drop=True)
+                
+            # Downsample for rendering only (keep full buffer for history/export)
+            stage = "downsample"
+            if len(df) > self.max_live_points:
+                step = max(1, len(df) // self.max_live_points)
+                df_full = df
+                df = df.iloc[::step].reset_index(drop=True)
+                # Guarantee we keep the latest point for axis limits
+                if not df.empty and not df_full.empty:
+                    if df.iloc[-1]["seconds"] != df_full.iloc[-1]["seconds"]:
+                        df = pd.concat([df, df_full.iloc[[-1]]], ignore_index=True)
+            
+            # Delegate to Plotter
+            stage = "plotter_update"
             self.plotter.update(df)
             
+            stage = "layout"
+            if not self._did_tight_layout:
+                try:
+                    self.figure.tight_layout()
+                    self._did_tight_layout = True
+                except: 
+                    pass
+            
+            stage = "draw"
+            try:
+                self.canvas.draw_idle()
+            except Exception:
+                pass
+
         except Exception as e:
-            print(f"Plot error: {e}")
+            print(f"Plot Error ({stage}): {e}")
+            return
+        finally:
+            pass
 
     def update_plot_options(self):
         """Callback for the 2x/0.5x BPM checkboxes."""
