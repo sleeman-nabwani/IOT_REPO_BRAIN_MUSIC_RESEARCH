@@ -12,11 +12,42 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 import glob
 import os
+import json
 
 # Output directory for results
 RESULTS_DIR = Path(__file__).parent / "results"
 PLOTS_DIR = RESULTS_DIR / "plots"
 PLOTS_DIR.mkdir(parents=True, exist_ok=True)
+
+def _read_session(csv_path: str):
+    """
+    Read a single session CSV, parse optional # meta line for params,
+    attach session_id, smoothing_window, stride.
+    """
+    session_id = Path(csv_path).parent.name
+    meta = {"smoothing_window": 3, "stride": 1}
+    # Read first line for meta
+    try:
+        with open(csv_path, "r", encoding="utf-8") as f:
+            first = f.readline()
+            if first.startswith("#"):
+                tag, _, rest = first.partition(":")
+                if tag.strip() == "# meta":
+                    meta.update(json.loads(rest.strip()))
+    except Exception:
+        pass
+    try:
+        df = pd.read_csv(csv_path, comment="#")
+    except Exception as e:
+        print(f"Error reading {csv_path}: {e}")
+        return None
+    if df.empty:
+        return None
+    df["session_id"] = session_id
+    df["smoothing_window"] = meta.get("smoothing_window", 3)
+    df["stride"] = meta.get("stride", 1)
+    return df
+
 
 def load_all_sessions(base_dir):
     """
@@ -30,19 +61,26 @@ def load_all_sessions(base_dir):
     
     dfs = []
     for f in csv_files:
-        try:
-            df = pd.read_csv(f)
-            # Add session ID to distinguish them
-            session_id = Path(f).parent.name
-            df['session_id'] = session_id
+        df = _read_session(f)
+        if df is not None:
             dfs.append(df)
-        except Exception as e:
-            print(f"Error reading {f}: {e}")
             
     if not dfs:
         return pd.DataFrame()
         
     return pd.concat(dfs, ignore_index=True)
+
+
+def remove_spikes(df, col="walking_bpm", window=5, threshold=40):
+    """
+    Drop points that deviate from the rolling median by more than `threshold`.
+    Keeps edges via min_periods=1. If column missing, returns df unchanged.
+    """
+    if col not in df.columns:
+        return df
+    med = df[col].rolling(window=window, center=True, min_periods=1).median()
+    mask = (df[col] - med).abs() <= threshold
+    return df[mask].copy()
 
 def analyze_intervals():
     # ADJUST THIS PATH to match your actual server/logs/Default location
@@ -63,6 +101,10 @@ def analyze_intervals():
     # The 'walking_bpm' column is our raw sensor input (or estimated).
     # Let's clean out zeros.
     df = df[df['walking_bpm'] > 0]
+    # Remove spikes that are far from local median (stronger threshold for obvious outliers)
+    df = remove_spikes(df, col="walking_bpm", window=5, threshold=200)
+    # Drop extreme values (hard cutoff) to catch 1000+ BPM misreads
+    df = df[df["walking_bpm"] <= 400]
     
     print(f"Valid walking points: {len(df)}")
     
@@ -75,17 +117,19 @@ def analyze_intervals():
     plt.title('Distribution of Walking BPM')
     plt.xlabel('BPM')
     plt.ylabel('Count')
+    plt.xlim(0, 1000)
     
     # Scatter: BPM vs Music BPM (How well did we track?)
     plt.subplot(2, 1, 2)
     # Sample a subset so plot isn't too heavy
     sample = df.sample(min(len(df), 2000))
-    plt.scatter(sample['walking_bpm'], sample['song_bpm'], alpha=0.3, s=10)
+    plt.scatter(sample['walking_bpm'], sample['song_bpm'], alpha=0.3, s=10, label="Samples")
     plt.title('Walking BPM vs Music Response (Correlation)')
     plt.xlabel('User Walking BPM')
     plt.ylabel('Music BPM')
     plt.plot([min(sample['walking_bpm']), max(sample['walking_bpm'])], 
-             [min(sample['walking_bpm']), max(sample['walking_bpm'])], 'r--') # Ideal Identity Line
+             [min(sample['walking_bpm']), max(sample['walking_bpm'])], 'r--', label="Ideal Identity Line")
+    plt.legend()
 
     plt.tight_layout()
     output_path = PLOTS_DIR / "bpm_distribution.png"

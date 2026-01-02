@@ -19,8 +19,8 @@ from utils.midi_player import MidiBeatSync
 from utils.logger import Logger
 from utils.BPM_estimation import BPM_estimation
 from utils.comms import session_handshake, handle_engine_command, handle_step
-from utils.main_helper_functions import retrain_knn_model
-from utils.KNN_predictor import KNNPredictor
+from utils.main_helper_functions import retrain_prediction_model
+from utils.LGBM_predictor import LGBMPredictor
 # from utils.safety import safe_execute
 
 #parse the arguments
@@ -64,13 +64,27 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--serial-port",
         type=str,
-        default="COM5",
-        help="Serial port for the ESP32 (default: COM5)",
+        default="COM3",
+        help="Serial port for the ESP32 (default: COM3)",
     )
     parser.add_argument(
-        "--disable-knn",
+        "--alpha-up",
+        type=float,
+        default=None,
+        help="Optional attack smoothing alpha override",
+    )
+    parser.add_argument(
+        "--alpha-down",
+        type=float,
+        default=None,
+        help="Optional decay smoothing alpha override",
+    )
+    parser.add_argument(
+        "--disable-prediction-model",
+        "--disable-prediction",
+        dest="disable_prediction",
         action="store_true",
-        help="Disable KNN prediction for this run",
+        help="Disable prediction model for this run",
     )
     return parser.parse_args()
 
@@ -91,9 +105,11 @@ def start_stdin_listener(command_queue):
 
 def main(args, status_callback=print, stop_event=None, session_dir_callback=None, command_queue=None):
     midi_path = args.midi_path
-    
+    smoothing_window = getattr(args, 'smoothing', 3)
+    stride = getattr(args, 'stride', 1)
+
     # 1. Initialize Logger 
-    logger = Logger(gui_callback=status_callback, session_name=getattr(args, 'session_name', None))
+    logger = Logger(gui_callback=status_callback, session_name=getattr(args, 'session_name', None), smoothing_window=smoothing_window, stride=stride)
     
     # OUTPUT SESSION DIR FOR GUI PARSING
     # The GUI listens for "SESSION_DIR:..." to know where to save the plot.
@@ -118,6 +134,12 @@ def main(args, status_callback=print, stop_event=None, session_dir_callback=None
         sys.stdout.flush()
         return None, logger, None
     
+    # Seed initial GUI data so song BPM appears immediately
+    try:
+        logger.log_data(time.time(), player.walkingBPM, player.walkingBPM, step_event=False)
+    except Exception:
+        pass
+    
     # 3. Log Mode
     if args.manual:
         logger.log("Starting in MANUAL MODE.")
@@ -129,16 +151,28 @@ def main(args, status_callback=print, stop_event=None, session_dir_callback=None
     else:
         logger.log("Starting in DYNAMIC MODE")
     
-    # 4. Initialize KNN Predictor
-    if args.disable_knn:
-        knn_predictor = None
-        logger.log("KNN prediction disabled")
+    # 4. Initialize prediction model (currently LightGBM predictor)
+    if args.disable_prediction:
+        prediction_model = None
+        logger.log("Prediction model disabled")
     else:
-        knn_predictor = KNNPredictor()
-        logger.log("KNN prediction enabled")
+        prediction_model = LGBMPredictor()
+        logger.log("Prediction model enabled (LightGBM)")
     
     # 5. Initialize BPM Estimation
-    bpm_estimation = BPM_estimation(player, logger, manual_mode=args.manual, manual_bpm=args.bpm, knn_predictor=knn_predictor)
+    bpm_estimation = BPM_estimation(
+        player,
+        logger,
+        manual_mode=args.manual,
+        manual_bpm=args.bpm,
+        prediction_model=prediction_model,
+        smoothing_window=smoothing_window,
+        stride=stride,
+    )
+    if args.alpha_up is not None:
+        bpm_estimation.set_smoothing_alpha_up(args.alpha_up)
+    if args.alpha_down is not None:
+        bpm_estimation.set_smoothing_alpha_down(args.alpha_down)
     logger.log("Session started")
     
     # 6. Open Serial Port
@@ -151,10 +185,6 @@ def main(args, status_callback=print, stop_event=None, session_dir_callback=None
     except Exception as e:
         logger.log(f"Failed to open serial port {port}: {e}")
         return player, logger, bpm_estimation
-
-    # Config from arguments
-    smoothing_window = getattr(args, 'smoothing', 3)
-    stride = getattr(args, 'stride', 1)
 
     if not session_handshake(ser, logger, smoothing_window=smoothing_window, stride=stride):
         logger.log("Handshake failed; aborting session")
@@ -196,27 +226,32 @@ def main(args, status_callback=print, stop_event=None, session_dir_callback=None
                 stop_event = threading.Event()
                 stop_event.set()
                 break
-          
-        # ANIMATION: We must run update_bpm() every loop iteration.
-        # This now also handles any pending manual BPM updates internally.
-        if not args.manual:
-            bpm_estimation.update_bpm()
+        
+        # ANIMATION: Run update_bpm() every loop iteration (manual or dynamic).
+        # In manual mode this still emits log packets each loop for plotting.
+        bpm_estimation.update_bpm()
             
         # read the step from the serial port
         raw_line = ser.readline()
         if not raw_line:
+            time.sleep(0.001)  # yield even when idle to avoid CPU/GIL starvation
             continue
+
         # handle the step
         try:
-            bpm, instant_bpm, current_ts = handle_step(raw_line, player.walkingBPM)
+            bpm, instant_bpm, sensor_ts, foot = handle_step(raw_line, player.walkingBPM)
         except ValueError:
+            time.sleep(0.001)
             continue
+
+        # Log using wall-clock processing time to keep CSV strictly monotonic.
+        event_epoch = time.time()
         
-        #register the step and log the data
-        bpm_estimation.register_step(bpm)    
-        logger.log_data(current_ts, player.walkingBPM, bpm, step_event=True)
+        # register the step and log the data
+        bpm_estimation.register_step(bpm, instant_bpm)
+        logger.log_data(event_epoch, player.walkingBPM, bpm, step_event=True, instant_bpm=instant_bpm)
         logger.log(f"Processed: BPM={bpm}")
-        
+
         # CPU Yield (Prevent 100% core usage)
         time.sleep(0.001)
         
@@ -225,8 +260,8 @@ def main(args, status_callback=print, stop_event=None, session_dir_callback=None
     player.close()
     if ser: ser.close()
     
-    # Auto-retrain KNN model with new session data
-    retrain_knn_model()
+    # Auto-retrain prediction model with new session data
+    retrain_prediction_model()
     
     print("EXIT_CLEAN")
     return player, logger, bpm_estimation

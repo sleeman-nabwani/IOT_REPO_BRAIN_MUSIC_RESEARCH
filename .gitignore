@@ -2,7 +2,6 @@ ESP32/SECRETS.h
 server/.idea/
 server/__pycache__/
 server/utils/__pycache__/
-server/logs/
 server/utils/logs
 .vscode/
 .venv/
@@ -13,3 +12,5 @@ research/processed_data
 research/__pycache__
 research/results/plots
 research/results/models/
+research/lightGBM/__pycache__/
+

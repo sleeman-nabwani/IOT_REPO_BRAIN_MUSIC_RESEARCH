@@ -14,7 +14,7 @@ def _format_elapsed(seconds: float) -> str:
 class Logger:
     # NOTE: This logger is used both for the console and for the GUI.
     #       It is initialized with a GUI callback if available.
-    def __init__(self, gui_callback=None, session_name=None):
+    def __init__(self, gui_callback=None, session_name=None, smoothing_window: int | None = None, stride: int | None = None):
         self.start_time = time.time()
         self.timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         self.gui_callback = gui_callback
@@ -37,10 +37,15 @@ class Logger:
         #creating the log file
         with self.file_path.open("w", encoding="utf-8") as handle:
             handle.write(f"Session log started at {self.timestamp} (t=0.000)\n")
-        #creating the csv file
+        #creating the csv file (with meta header)
+        meta = {
+            "smoothing_window": int(smoothing_window) if smoothing_window is not None else 3,
+            "stride": int(stride) if stride is not None else 1,
+        }
         with self.csv_path.open("w", newline="", encoding="utf-8") as handle:
+            handle.write(f"# meta: {json.dumps(meta)}\n")
             csv_writer = writer(handle)
-            csv_writer.writerow(["time", "song_bpm", "walking_bpm", "step_event"])
+            csv_writer.writerow(["time", "song_bpm", "walking_bpm", "step_event", "instant_bpm"])
 
     def _elapsed_str(self, timestamp: float | None = None) -> str:
         if timestamp is None:
@@ -60,11 +65,12 @@ class Logger:
             self.gui_callback(message)
             
     def log_data(
-        self, timestamp: float, song_bpm: float, walking_bpm: float, step_event: bool = False):
+        self, timestamp: float, song_bpm: float, walking_bpm: float, step_event: bool = False, instant_bpm: float | None = None):
         elapsed = self._elapsed_str(timestamp)
+        ib = instant_bpm if step_event else ""
         with self.csv_path.open("a", newline="", encoding="utf-8") as handle:
             csv_writer = writer(handle)
-            csv_writer.writerow([elapsed, song_bpm, walking_bpm, step_event])
+            csv_writer.writerow([elapsed, song_bpm, walking_bpm, step_event, ib])
             
         # DUAL STREAMING: Broadcast to GUI via RAM (Stdout)
         # Format: DATA_PACKET:{"t": ..., "s": ..., "w": ..., "e": ...}
@@ -73,7 +79,9 @@ class Logger:
             "t": elapsed, # time string
             "s": song_bpm,
             "w": walking_bpm,
-            "e": step_event
+            "e": step_event,
         }
+        if step_event and instant_bpm is not None:
+            packet["i"] = instant_bpm
         print(f"DATA_PACKET:{json.dumps(packet)}")
         sys.stdout.flush()

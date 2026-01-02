@@ -12,7 +12,7 @@ class SubprocessManager:
     - Writes commands to its STDIN.
     - Reads logs from its STDOUT.
     """
-    def __init__(self, midi_path, serial_port, manual_mode, manual_bpm, smoothing_window, stride, log_callback, session_dir_callback, data_callback=None, session_name=None):
+    def __init__(self, midi_path, serial_port, manual_mode, manual_bpm, smoothing_window, stride, log_callback, session_dir_callback, data_callback=None, session_name=None, alpha_up=None, alpha_down=None):
         self.log_callback = log_callback
         self.session_dir_callback = session_dir_callback
         self.data_callback = data_callback
@@ -32,15 +32,23 @@ class SubprocessManager:
         if serial_port:
              cmd.extend(["--serial-port", str(serial_port)]) 
         
-        # We pass initial config via flags
-        cmd.extend(["--smoothing", str(smoothing_window)])
-        cmd.extend(["--stride", str(stride)])
+        # We pass initial config via flags only if provided (engine has defaults)
+        if smoothing_window is not None:
+            cmd.extend(["--smoothing", str(smoothing_window)])
+        if stride is not None:
+            cmd.extend(["--stride", str(stride)])
+        
+        if alpha_up is not None:
+            cmd.extend(["--alpha-up", str(alpha_up)])
+        if alpha_down is not None:
+            cmd.extend(["--alpha-down", str(alpha_down)])
         
         if session_name:
              cmd.extend(["--session-name", str(session_name)])
         
         # Launch Process
         try:
+            env = os.environ.copy()
             # We use bufsize=1 for line buffering
             self.process = subprocess.Popen(
                 cmd,
@@ -49,7 +57,8 @@ class SubprocessManager:
                 stderr=subprocess.PIPE, # Capture separately
                 text=True,
                 bufsize=1,
-                cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))) # Execute INSIDE server/ folder (parent of utils)
+                cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))), # Execute INSIDE server/ folder (parent of utils)
+                env=env,
             )
             self.running = True
             
@@ -87,7 +96,8 @@ class SubprocessManager:
         while self.running and self.process:
             try:
                 line = self.process.stdout.readline()
-                if not line: break
+                if not line:
+                    break
                 line = line.strip()
                 
                 # Check for special signals
