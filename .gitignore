@@ -3,6 +3,7 @@ server/.idea/
 server/__pycache__/
 server/utils/__pycache__/
 server/utils/logs
+server/utils/Modes/__pycache__
 .vscode/
 .venv/
 venv311/
@@ -13,4 +14,5 @@ research/__pycache__
 research/results/plots
 research/results/models/
 research/lightGBM/__pycache__/
+
 
