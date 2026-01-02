@@ -10,7 +10,8 @@ import random
 class BPM_estimation:
     def __init__(self, player: MidiBeatSync, logger: Logger, manual_mode: bool = False,
                 manual_bpm: float = None, prediction_model: LGBMPredictor = None,
-                smoothing_window: int = 3, stride: int = 1, hybrid_mode: bool = False) -> None:
+                smoothing_window: int = 3, stride: int = 1,
+                run_type: str | None = None, hybrid_mode: bool = False) -> None:
         self.last_msg_time = time.time()
         self.player = player
         self.logger = logger
@@ -26,6 +27,7 @@ class BPM_estimation:
         self._warmup_thread = None
         self.smoothing_window = smoothing_window
         self.stride = stride
+        self.run_type = run_type or "dynamic"
         
         # Hybrid Mode
         self.hybrid_mode = hybrid_mode
@@ -209,11 +211,26 @@ class BPM_estimation:
                 pred = self.prediction_model.predict_next(
                     smoothing_window=self.smoothing_window,
                     stride=self.stride,
+                    run_type=self.run_type,
                 )
                 if pred is not None:
                     self.target_bpm = float(pred) * 0.65 + new_bpm * 0.35
             except Exception:
                 pass
+
+    def _run_warmup(self, initial_bpm: float | None):
+        try:
+            self.prediction_model.warmup(initial_bpm, run_type=self.run_type)
+        except Exception:
+            self._warmup_failed = True
+        finally:
+            self._warmup_done.set()
+
+
+    def update_recorded_values(self,last_msg_time: float, last_recorded_bpm: float):
+        # Keeps legacy compatibility, but register_step is preferred.
+        self.last_msg_time = last_msg_time
+        self.last_recorded_bpm = last_recorded_bpm
 
     def update_bpm(self):
         now_ts = time.time()

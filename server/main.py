@@ -112,9 +112,16 @@ def main(args, status_callback=print, stop_event=None, session_dir_callback=None
     midi_path = args.midi_path
     smoothing_window = getattr(args, 'smoothing', 3)
     stride = getattr(args, 'stride', 1)
+    run_type = "manual" if args.manual else ("hybrid" if getattr(args, "hybrid", False) else "dynamic")
 
     # 1. Initialize Logger 
-    logger = Logger(gui_callback=status_callback, session_name=getattr(args, 'session_name', None), smoothing_window=smoothing_window, stride=stride)
+    logger = Logger(
+        gui_callback=status_callback,
+        session_name=getattr(args, 'session_name', None),
+        smoothing_window=smoothing_window,
+        stride=stride,
+        run_type=run_type,
+    )
     
     # OUTPUT SESSION DIR FOR GUI PARSING
     # The GUI listens for "SESSION_DIR:..." to know where to save the plot.
@@ -155,13 +162,14 @@ def main(args, status_callback=print, stop_event=None, session_dir_callback=None
             logger.log(f"Using default song BPM: {player.songBPM}")
     else:
         logger.log("Starting in DYNAMIC MODE")
+    logger.log(f"Run type: {run_type}")
     
     # 4. Initialize prediction model (currently LightGBM predictor)
     if args.disable_prediction:
         prediction_model = None
         logger.log("Prediction model disabled")
     else:
-        prediction_model = LGBMPredictor()
+        prediction_model = LGBMPredictor(run_type=run_type)
         logger.log("Prediction model enabled (LightGBM)")
     
     # 5. Initialize BPM Estimation
@@ -173,6 +181,7 @@ def main(args, status_callback=print, stop_event=None, session_dir_callback=None
         prediction_model=prediction_model,
         smoothing_window=smoothing_window,
         stride=stride,
+        run_type=run_type,
         hybrid_mode=getattr(args, 'hybrid', False),
     )
     if args.alpha_up is not None:
