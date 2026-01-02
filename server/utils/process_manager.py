@@ -12,7 +12,7 @@ class SubprocessManager:
     - Writes commands to its STDIN.
     - Reads logs from its STDOUT.
     """
-    def __init__(self, midi_path, serial_port, manual_mode, manual_bpm, smoothing_window, stride, log_callback, session_dir_callback, data_callback=None, session_name=None, alpha_up=None, alpha_down=None):
+    def __init__(self, midi_path, serial_port, manual_mode, manual_bpm, smoothing_window, stride, log_callback, session_dir_callback, data_callback=None, session_name=None, alpha_up=None, alpha_down=None, hybrid_mode=False):
         self.log_callback = log_callback
         self.session_dir_callback = session_dir_callback
         self.data_callback = data_callback
@@ -45,6 +45,9 @@ class SubprocessManager:
         
         if session_name:
              cmd.extend(["--session-name", str(session_name)])
+        
+        if hybrid_mode:
+            cmd.append("--hybrid")
         
         # Launch Process
         try:

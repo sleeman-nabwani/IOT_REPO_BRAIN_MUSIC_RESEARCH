@@ -30,6 +30,37 @@ except ImportError:
 # ==================================================================================
 
 
+# --- HELPER CLASS FOR COLLAPSIBLE SECTIONS ---
+class CollapsiblePane(ttk.Frame):
+    def __init__(self, parent, title="", expanded=False, style_prefix=""):
+        # Match parent style (Card.TFrame) to avoid "black line" effect from default TFrame bg
+        super().__init__(parent, style="Card.TFrame")
+        self.parent = parent
+        self.expanded = expanded
+        self.title = title
+        
+        # Toggle Button
+        self.toggle_btn = ttk.Button(self, text=self._get_title(), command=self.toggle, style="Compact.TButton", width=100) # Wide button
+        self.toggle_btn.pack(fill="x", anchor="n")
+        
+        # Content Frame (Hidden by default)
+        self.content_frame = ttk.Frame(self, style="Card.TFrame")
+        
+        if expanded:
+            self.content_frame.pack(fill="x", expand=True)
+
+    def _get_title(self):
+        return f"▼ {self.title}" if self.expanded else f"▶ {self.title}"
+
+    def toggle(self):
+        self.expanded = not self.expanded
+        self.toggle_btn.configure(text=self._get_title())
+        if self.expanded:
+            self.content_frame.pack(fill="x", expand=True) # Removed pady=5 to remove gap
+        else:
+            self.content_frame.pack_forget()
+
+
 class GuiApp:
     def __init__(self, root: tk.Tk):
         self.root = root
@@ -113,8 +144,9 @@ class GuiApp:
         self.port_scan_thread = None
 
 
+        self.port_scan_thread = None
 
-        # --- LAYOUT ---
+    # --- LAYOUT ---
         navbar = ttk.Frame(root, style="TFrame")
         navbar.pack(fill="x", padx=25, pady=(20, 10))
         
@@ -243,6 +275,7 @@ class GuiApp:
         section("Sync Mode")
         self.mode_var = tk.StringVar(value="dynamic")
         ttk.Radiobutton(sidebar, text="🧠 Dynamic", value="dynamic", variable=self.mode_var, command=self.on_mode_change).pack(anchor="w", pady=5)
+        ttk.Radiobutton(sidebar, text="🚀 Hybrid (Cruise Control)", value="hybrid", variable=self.mode_var, command=self.on_mode_change).pack(anchor="w", pady=5)
         ttk.Radiobutton(sidebar, text="🛠 Manual Override", value="manual", variable=self.mode_var, command=self.on_mode_change).pack(anchor="w", pady=5)
         # MANUAL BPM
         self.manual_bpm_frame = ttk.Frame(sidebar, style="Card.TFrame")
@@ -263,10 +296,18 @@ class GuiApp:
                                    variable=self.manual_bpm_var, command=self.on_bpm_slider_change)
         self.bpm_slider.pack(side="left", fill="x", expand=True, padx=5)
 
-        # SMOOTHING CONTROL (Climbing & Cascading)
-        ttk.Label(sidebar, text="CLIMBING (SPEEDING UP)", style="CardHeader.TLabel").pack(anchor="w", pady=(15, 0))
+
+        # --- ADVANCED SETTINGS (COLLAPSIBLE) ---
+        self.advanced_pane = CollapsiblePane(sidebar, title="Advanced Settings", expanded=False)
+        self.advanced_pane.pack(fill="x", pady=(15, 0))
         
-        attack_row = ttk.Frame(sidebar, style="Card.TFrame")
+        # Re-parent controls to [self.advanced_pane.content_frame] instead of [sidebar]
+        adv_parent = self.advanced_pane.content_frame
+        
+        # SMOOTHING CONTROL (Climbing & Cascading)
+        ttk.Label(adv_parent, text="CLIMBING (SPEEDING UP)", style="CardHeader.TLabel").pack(anchor="w", pady=(5, 0))
+        
+        attack_row = ttk.Frame(adv_parent, style="Card.TFrame")
         attack_row.pack(fill="x", pady=5)
         
         self.smoothing_up_var = tk.StringVar() 
@@ -277,9 +318,9 @@ class GuiApp:
         ttk.Button(attack_row, text="?", style="Help.TButton", width=2, command=self.show_attack_help).pack(side="left", padx=5)
 
         # Cascading
-        ttk.Label(sidebar, text="CASCADING (SLOWING DOWN)", style="CardHeader.TLabel").pack(anchor="w", pady=(15, 0))
+        ttk.Label(adv_parent, text="CASCADING (SLOWING DOWN)", style="CardHeader.TLabel").pack(anchor="w", pady=(15, 0))
         
-        decay_row = ttk.Frame(sidebar, style="Card.TFrame")
+        decay_row = ttk.Frame(adv_parent, style="Card.TFrame")
         decay_row.pack(fill="x", pady=5)
         
         self.smoothing_down_var = tk.StringVar()
@@ -290,8 +331,8 @@ class GuiApp:
         ttk.Button(decay_row, text="?", style="Help.TButton", width=2, command=self.show_decay_help).pack(side="left", padx=5)
 
         # STEP AVERAGING WINDOW (ESP32 Config)
-        ttk.Label(sidebar, text="Smoothing Window (Stability)", style="CardHeader.TLabel").pack(anchor="w", pady=(10, 0))
-        window_row = ttk.Frame(sidebar, style="Card.TFrame")
+        ttk.Label(adv_parent, text="Smoothing Window (Stability)", style="CardHeader.TLabel").pack(anchor="w", pady=(10, 0))
+        window_row = ttk.Frame(adv_parent, style="Card.TFrame")
         window_row.pack(fill="x", pady=5)
         
         self.step_window_var = tk.StringVar()
@@ -302,8 +343,8 @@ class GuiApp:
         ttk.Button(window_row, text="?", style="Help.TButton", width=2, command=self.show_window_help).pack(side="left", padx=5)
 
         # STRIDE CONFIG 
-        ttk.Label(sidebar, text="Stride (Update Frequency)", style="CardHeader.TLabel").pack(anchor="w", pady=(10, 0))
-        stride_row = ttk.Frame(sidebar, style="Card.TFrame")
+        ttk.Label(adv_parent, text="Stride (Update Frequency)", style="CardHeader.TLabel").pack(anchor="w", pady=(10, 0))
+        stride_row = ttk.Frame(adv_parent, style="Card.TFrame")
         stride_row.pack(fill="x", pady=5)
         self.stride_var = tk.StringVar()
         entry_stride = ttk.Entry(stride_row, textvariable=self.stride_var, width=15, font=("Segoe UI", 12))
@@ -534,6 +575,7 @@ class GuiApp:
             session_name=s_name,
             alpha_up=au,
             alpha_down=ad,
+            hybrid_mode=(self.mode_var.get() == "hybrid"),
         )
         
         # Update UI state
@@ -605,29 +647,18 @@ class GuiApp:
     def refresh_session_list(self):
         vals = self.get_existing_sessions()
         
-        # Determine strict type needed
-        # If no files -> Entry (cleaner). If files -> Combobox (dropdown).
-        target_type = ttk.Combobox if vals else ttk.Entry
+        # Always use a Combobox (Writable) so user can Type NEW or Select EXISTING
+        # We assume self.session_input_widget is already a Combobox (created in __init__)
         
-        # Check current type
-        current_type = type(self.session_input_widget)
-        
-        if current_type != target_type:
-            # Swap Widget
+        # Ensure it has not been swapped to an Entry by legacy code
+        if not isinstance(self.session_input_widget, ttk.Combobox):
+            # If for some reason it's an Entry, swap it back to Combobox permanently
             self.session_input_widget.destroy()
-            if target_type == ttk.Combobox:
-                self.session_input_widget = ttk.Combobox(self.session_row, textvariable=self.session_name_var)
-                self.session_input_widget['values'] = vals
-            else:
-                self.session_input_widget = ttk.Entry(self.session_row, textvariable=self.session_name_var)
-            
-            # Repack (pack side=left puts it before the right-aligned button)
+            self.session_input_widget = ttk.Combobox(self.session_row, textvariable=self.session_name_var)
             self.session_input_widget.pack(side="left", fill="x", expand=True, padx=(0, 5))
             
-        elif vals and isinstance(self.session_input_widget, ttk.Combobox):
-             self.session_input_widget['values'] = vals
+        self.session_input_widget['values'] = vals
 
-        # Don't auto-select to preserve user input intent if they are typing
 
 
     def refresh_analysis_subjects(self):
@@ -777,6 +808,14 @@ class GuiApp:
             if self.live_data_buffer:
                 import pandas as pd
                 df = pd.DataFrame(self.live_data_buffer)
+                
+                # Preprocess DF (match logic in refresh_plot)
+                df.rename(columns={"t": "time", "s": "song_bpm", "w": "walking_bpm", "e": "step_event"}, inplace=True)
+                if "time" in df.columns:
+                     df["seconds"] = df["time"].apply(_elapsed_to_seconds)
+                else:
+                     df["seconds"] = df.index
+                     
                 self.plotter.finalize_plot(df)
                 self.canvas.draw()
         except Exception as e:

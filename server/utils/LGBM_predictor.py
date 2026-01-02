@@ -3,6 +3,10 @@ from collections import deque
 import threading
 import joblib
 import numpy as np
+import warnings
+
+# Suppress "X does not have valid feature names" warning from LightGBM/Sklearn
+warnings.filterwarnings("ignore", category=UserWarning, message=".*X does not have valid feature names.*")
 
 
 class LGBMPredictor:

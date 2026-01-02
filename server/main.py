@@ -86,6 +86,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Disable prediction model for this run",
     )
+    parser.add_argument(
+        "--hybrid",
+        action="store_true",
+        help="Enable hybrid mode (starts dynamic, locks if steady)",
+    )
     return parser.parse_args()
 
 def start_stdin_listener(command_queue):
@@ -168,6 +173,7 @@ def main(args, status_callback=print, stop_event=None, session_dir_callback=None
         prediction_model=prediction_model,
         smoothing_window=smoothing_window,
         stride=stride,
+        hybrid_mode=getattr(args, 'hybrid', False),
     )
     if args.alpha_up is not None:
         bpm_estimation.set_smoothing_alpha_up(args.alpha_up)
@@ -238,7 +244,19 @@ def main(args, status_callback=print, stop_event=None, session_dir_callback=None
             continue
 
         # handle the step
+        # TWEAK: Check for BUTTON messages first (BTN,<delta>)
         try:
+            line_str = raw_line.decode("utf-8", errors="ignore").strip()
+            if line_str.startswith("BTN,"):
+                parts = line_str.split(",")
+                if len(parts) >= 2:
+                    delta = float(parts[1])
+                    logger.log(f"HARDWARE: Button Delta Received: {delta}")
+                    
+                    # Refactored to BPM_estimation
+                    bpm_estimation.register_button_delta(delta)
+                continue
+
             bpm, instant_bpm, sensor_ts, foot = handle_step(raw_line, player.walkingBPM)
         except ValueError:
             time.sleep(0.001)
