@@ -122,6 +122,16 @@ class GuiApp:
         style.configure("Help.TButton", font=("Segoe UI", 9, "bold"), background=self.P["card_bg"], foreground=self.P["accent"], borderwidth=0, padding=(2, 0))
         style.map("Help.TButton", background=[("active", self.P["card_bg"])], foreground=[("active", "white")])
 
+        # PanedWindow and Separator styling for dark theme
+        style.configure("TPanedwindow", background=self.P["bg"])
+        style.configure("TSeparator", background=self.P["border"])
+        # Sub label variant for card backgrounds
+        style.configure("CardSub.TLabel", font=("Segoe UI", 11), foreground=self.P["text_sub"], background=self.P["card_bg"])
+        # Treeview dark styling
+        style.configure("Treeview", background=self.P["card_bg"], foreground=self.P["text_main"],
+                        fieldbackground=self.P["card_bg"], borderwidth=0)
+        style.map("Treeview", background=[("selected", self.P["accent"])], foreground=[("selected", "white")])
+
         base_dir = Path(__file__).resolve().parent.parent
         default_midi = base_dir / "midi_files" / "Technion_March1.mid"
         
@@ -358,6 +368,16 @@ class GuiApp:
         self._bind_placeholder(entry_stride, self.stride_var, "Set Stride")
         ttk.Label(stride_row, text="Steps", style="Sub.TLabel").pack(side="left", padx=(0, 5))
         ttk.Button(stride_row, text="?", style="Help.TButton", width=2, command=self.show_stride_help).pack(side="left", padx=5)
+
+        # PREDICTION MODEL SELECTOR
+        ttk.Label(adv_parent, text="Prediction Model", style="CardHeader.TLabel").pack(anchor="w", pady=(10, 0))
+        model_row = ttk.Frame(adv_parent, style="Card.TFrame")
+        model_row.pack(fill="x", pady=5)
+        self.model_var = tk.StringVar(value="Base Model")
+        self.model_combo = ttk.Combobox(model_row, textvariable=self.model_var, state="readonly", width=25)
+        self.model_combo.pack(side="left", padx=(0, 5))
+        ttk.Button(model_row, text="↻", style="Compact.TButton", width=3, command=self._refresh_model_list).pack(side="left")
+        self._refresh_model_list()  # Populate on init
         
         # Weight Calibration (Advanced)
         ttk.Label(adv_parent, text="Weight Calibration", style="CardHeader.TLabel").pack(anchor="w", pady=(10, 0))
@@ -383,40 +403,55 @@ class GuiApp:
         self.btn_quit = ttk.Button(sidebar, text="❌ QUIT APP", command=self.quit_app, style="Secondary.TButton")
         self.btn_quit.pack(fill="x")
 
-        # Visualization
-        viz_root = ttk.Frame(main_body, style="TFrame")
-        viz_root.grid(row=0, column=1, sticky="nsew")
-        # Visualization Controls
-        viz_controls = ttk.Frame(viz_root, style="TFrame")
+        # ====================== TABBED MAIN AREA ======================
+        # Notebook for switching between Session (live plot) and Training tabs
+        self.main_notebook = ttk.Notebook(main_body)
+        self.main_notebook.grid(row=0, column=1, sticky="nsew")
+
+        # Configure Notebook style
+        style.configure("TNotebook", background=self.P["bg"], borderwidth=0)
+        style.configure("TNotebook.Tab", font=("Segoe UI", 10, "bold"), padding=(15, 8),
+                        background=self.P["card_bg"], foreground=self.P["text_sub"])
+        style.map("TNotebook.Tab",
+                  background=[("selected", self.P["accent"])],
+                  foreground=[("selected", "white")])
+
+        # -------------------- TAB 1: SESSION (Live Plot) --------------------
+        tab_session = ttk.Frame(self.main_notebook, style="TFrame")
+        self.main_notebook.add(tab_session, text="  ▶ Session  ")
+
+        viz_controls = ttk.Frame(tab_session, style="TFrame")
         viz_controls.pack(fill="x", pady=(0, 5))
         
         self.show_2x_var = tk.BooleanVar(value=False)
         self.show_half_var = tk.BooleanVar(value=False)
         
-        # Checkboxes
         ttk.Checkbutton(viz_controls, text="Show 2x BPM", variable=self.show_2x_var, 
                         command=self.update_plot_options).pack(side="right", padx=10)
         ttk.Checkbutton(viz_controls, text="Show 0.5x BPM", variable=self.show_half_var, 
                         command=self.update_plot_options).pack(side="right", padx=10)
         
-        plot_card = ttk.Frame(viz_root, style="Card.TFrame", padding=10)
+        plot_card = ttk.Frame(tab_session, style="Card.TFrame", padding=10)
         plot_card.pack(fill="both", expand=True)
         
         self.figure = Figure(figsize=(5, 4), dpi=100)
         self.figure.patch.set_facecolor(self.P["card_bg"])
-        # CHANGED: Single subplot (No bottom graph)
         self.ax1 = self.figure.add_subplot(111)
-        self.ax2 = None # Explicitly None so Plotter knows
+        self.ax2 = None
         self.figure.subplots_adjust(left=0.08, bottom=0.1, right=0.95, top=0.92)
         
-        # Initialize Plotter Logic
         self.plotter = LivePlotter(self.ax1, self.P)
         self.plotter.view_window_sec = self.view_window_sec
-        # Initial style application (empty)
         self.plotter.update(pd.DataFrame({"seconds": [], "walking_bpm": [], "song_bpm": [], "step_event": []}))
 
         self.canvas = FigureCanvasTkAgg(self.figure, master=plot_card)
         self.canvas.get_tk_widget().pack(fill="both", expand=True)
+
+        # -------------------- TAB 2: MODEL TRAINING --------------------
+        tab_training = ttk.Frame(self.main_notebook, style="TFrame")
+        self.main_notebook.add(tab_training, text="  🧠 Training  ")
+
+        self._build_training_tab(tab_training)
 
         self.on_mode_change() # Init state
         self.poll_status()
@@ -464,6 +499,38 @@ class GuiApp:
     def refresh_midi_list(self):
         self.midi_combo['values'] = self.get_midi_files()
         if self.midi_combo['values']: self.midi_combo.current(0)
+
+    def _refresh_model_list(self):
+        """Scan for available prediction models (base + user heads)."""
+        models_dir = Path(__file__).resolve().parent.parent / "research" / "LightGBM" / "results" / "models"
+        model_options = []
+        self._model_paths = {}  # Map display name -> actual path
+        
+        # Base model
+        base_model = models_dir / "lgbm_model.joblib"
+        if base_model.exists():
+            model_options.append("Base Model")
+            self._model_paths["Base Model"] = str(base_model)
+        
+        # User head models
+        for head in sorted(models_dir.glob("lgbm_user_head_*.joblib")):
+            suffix = head.stem.replace("lgbm_user_head_", "")
+            display_name = f"User Head: {suffix}"
+            model_options.append(display_name)
+            self._model_paths[display_name] = str(head)
+        
+        if not model_options:
+            model_options = ["No models found"]
+            self._model_paths["No models found"] = None
+        
+        self.model_combo['values'] = model_options
+        if model_options and self.model_var.get() not in model_options:
+            self.model_combo.current(0)
+
+    def get_selected_model_path(self):
+        """Return the file path of the selected prediction model, or None."""
+        selected = self.model_var.get()
+        return self._model_paths.get(selected)
     
     def on_bpm_slider_change(self, val):
         """Handle slider movement with real-time update."""
@@ -516,6 +583,9 @@ class GuiApp:
     def start_session(self):
         """Action for the 'START SESSION' button."""
         if self.is_running: return
+        if self.is_training:
+            self.log("Cannot start session while training is in progress.")
+            return
 
         # Clear any leftover live data/plot from previous session
         self.live_data_buffer = []
@@ -578,6 +648,9 @@ class GuiApp:
             if val: ad = float(val)
         except: pass
 
+        # Get selected prediction model path
+        model_path = self.get_selected_model_path()
+        
         # Create and start the Subprocess Manager
         self.session_thread = SubprocessManager(
             str(p),
@@ -593,6 +666,7 @@ class GuiApp:
             alpha_up=au,
             alpha_down=ad,
             hybrid_mode=(self.mode_var.get() == "hybrid"),
+            model_path=model_path,
         )
         
         # Update UI state
@@ -981,6 +1055,423 @@ class GuiApp:
         else:
             self.btn_start.configure(state="disabled")
             self.btn_stop.configure(state="normal")
+
+    # ====================== TRAINING TAB ======================
+    def _build_training_tab(self, parent):
+        """Build the Model Training tab UI."""
+        self.is_training = False
+        self.training_process = None
+
+        # Use PanedWindow for resizable two-column layout
+        paned = ttk.PanedWindow(parent, orient="horizontal")
+        paned.pack(fill="both", expand=True, padx=5, pady=5)
+
+        # ---- LEFT: Session Selection ----
+        left_card = ttk.Frame(paned, style="Card.TFrame", padding=15)
+        paned.add(left_card, weight=1)
+
+        ttk.Label(left_card, text="Select Sessions for Training", style="CardHeader.TLabel").pack(anchor="w")
+        ttk.Label(left_card, text="Check users/sessions to include in training data",
+                  style="CardSub.TLabel").pack(anchor="w", pady=(0, 10))
+
+        # Treeview for session selection
+        tree_frame = ttk.Frame(left_card, style="Card.TFrame")
+        tree_frame.pack(fill="both", expand=True)
+
+        tree_scroll = ttk.Scrollbar(tree_frame, orient="vertical")
+        self.session_tree = ttk.Treeview(tree_frame, columns=("sessions",), show="tree",
+                                          selectmode="extended", yscrollcommand=tree_scroll.set)
+        tree_scroll.configure(command=self.session_tree.yview)
+        tree_scroll.pack(side="right", fill="y")
+        self.session_tree.pack(side="left", fill="both", expand=True)
+
+        self.session_tree.column("#0", width=300, stretch=True)
+        self.session_tree.heading("#0", text="User / Session")
+
+        # Buttons under tree
+        tree_btn_frame = ttk.Frame(left_card, style="Card.TFrame")
+        tree_btn_frame.pack(fill="x", pady=(10, 0))
+        ttk.Button(tree_btn_frame, text="↻ Refresh", command=self._refresh_training_sessions,
+                   style="Compact.TButton").pack(side="left", padx=(0, 5))
+        ttk.Button(tree_btn_frame, text="Select All", command=self._select_all_sessions,
+                   style="Compact.TButton").pack(side="left", padx=(0, 5))
+        ttk.Button(tree_btn_frame, text="Clear", command=self._clear_session_selection,
+                   style="Compact.TButton").pack(side="left")
+
+        # ---- RIGHT: Training Options & Controls ----
+        right_card = ttk.Frame(paned, style="Card.TFrame", padding=15)
+        paned.add(right_card, weight=1)
+
+        ttk.Label(right_card, text="Training Options", style="CardHeader.TLabel").pack(anchor="w")
+
+        # Algorithm selection
+        algo_frame = ttk.Frame(right_card, style="Card.TFrame")
+        algo_frame.pack(fill="x", pady=(10, 5))
+        ttk.Label(algo_frame, text="Algorithm:", style="CardLabel.TLabel").pack(side="left")
+        self.algo_var = tk.StringVar(value="LightGBM")
+        algo_combo = ttk.Combobox(algo_frame, textvariable=self.algo_var, state="readonly", width=15)
+        algo_combo['values'] = ["LightGBM"]  # Expandable later
+        algo_combo.pack(side="left", padx=(10, 0))
+
+        # Training type selection
+        type_frame = ttk.Frame(right_card, style="Card.TFrame")
+        type_frame.pack(fill="x", pady=5)
+        ttk.Label(type_frame, text="Training Type:", style="CardLabel.TLabel").pack(side="left")
+        self.train_type_var = tk.StringVar(value="base")
+        ttk.Radiobutton(type_frame, text="Base Model", variable=self.train_type_var, value="base").pack(side="left", padx=(10, 5))
+        ttk.Radiobutton(type_frame, text="User Head", variable=self.train_type_var, value="user_head").pack(side="left")
+
+        # User head options (shown when user_head selected)
+        self.user_head_frame = ttk.Frame(right_card, style="Card.TFrame")
+        self.user_head_frame.pack(fill="x", pady=5)
+        ttk.Label(self.user_head_frame, text="User Name:", style="CardLabel.TLabel").pack(side="left")
+        self.user_head_name_var = tk.StringVar(value="")
+        ttk.Entry(self.user_head_frame, textvariable=self.user_head_name_var, width=20).pack(side="left", padx=(10, 0))
+        ttk.Label(self.user_head_frame, text="(for saving head artifact)", style="CardSub.TLabel").pack(side="left", padx=(5, 0))
+
+        # Optuna optimization checkbox (only for base model)
+        optuna_frame = ttk.Frame(right_card, style="Card.TFrame")
+        optuna_frame.pack(fill="x", pady=5)
+        self.optuna_var = tk.BooleanVar(value=False)
+        self.optuna_check = ttk.Checkbutton(optuna_frame, text="Optuna Hyperparameter Optimization",
+                                             variable=self.optuna_var, command=self._on_optuna_change)
+        self.optuna_check.pack(side="left")
+        
+        # Optuna trials setting
+        self.optuna_trials_frame = ttk.Frame(right_card, style="Card.TFrame")
+        ttk.Label(self.optuna_trials_frame, text="Trials:", style="CardLabel.TLabel").pack(side="left")
+        self.optuna_trials_var = tk.StringVar(value="30")
+        ttk.Entry(self.optuna_trials_frame, textvariable=self.optuna_trials_var, width=6).pack(side="left", padx=(5, 0))
+        ttk.Label(self.optuna_trials_frame, text="(more = better but slower)", style="CardSub.TLabel").pack(side="left", padx=(5, 0))
+
+        # Bind radio button change (must be after optuna widgets are created)
+        self.train_type_var.trace_add("write", lambda *_: self._on_train_type_change())
+        self._on_train_type_change()  # Initial state
+
+        # Separator
+        ttk.Separator(right_card, orient="horizontal").pack(fill="x", pady=15)
+
+        # Progress section
+        ttk.Label(right_card, text="Training Progress", style="CardHeader.TLabel").pack(anchor="w")
+
+        self.train_progress = ttk.Progressbar(right_card, mode="indeterminate", length=300)
+        self.train_progress.pack(fill="x", pady=(10, 5))
+
+        self.train_status_var = tk.StringVar(value="Ready to train")
+        ttk.Label(right_card, textvariable=self.train_status_var, style="CardSub.TLabel").pack(anchor="w")
+
+        # Training log (small text area)
+        log_frame = ttk.Frame(right_card, style="Card.TFrame")
+        log_frame.pack(fill="both", expand=True, pady=(10, 0))
+        self.train_log = tk.Text(log_frame, height=8, wrap="word", font=("Consolas", 9),
+                                  bg=self.P["bg"], fg=self.P["text_main"], insertbackground=self.P["text_main"],
+                                  relief="flat", borderwidth=2)
+        log_scroll = ttk.Scrollbar(log_frame, orient="vertical", command=self.train_log.yview)
+        self.train_log.configure(yscrollcommand=log_scroll.set)
+        log_scroll.pack(side="right", fill="y")
+        self.train_log.pack(side="left", fill="both", expand=True)
+        self.train_log.configure(state="disabled")
+
+        # Buttons row
+        btn_row = ttk.Frame(right_card, style="Card.TFrame")
+        btn_row.pack(fill="x", pady=(15, 0))
+
+        self.btn_train = ttk.Button(btn_row, text="🚀 START TRAINING", command=self._start_training,
+                                     style="Primary.TButton")
+        self.btn_train.pack(side="left", fill="x", expand=True, padx=(0, 5))
+
+        self.btn_view_results = ttk.Button(btn_row, text="📊 VIEW RESULTS", command=self._view_training_results,
+                                            style="Secondary.TButton")
+        self.btn_view_results.pack(side="left", fill="x", expand=True, padx=(5, 0))
+
+        # Populate sessions on init
+        self.root.after(100, self._refresh_training_sessions)
+
+    def _on_train_type_change(self):
+        """Show/hide user head options based on selection."""
+        # Guard: optuna widgets may not exist yet during init
+        has_optuna = hasattr(self, "optuna_check")
+        
+        if self.train_type_var.get() == "user_head":
+            self.user_head_frame.pack(fill="x", pady=5)
+            if has_optuna:
+                self.optuna_check.configure(state="disabled")
+                self.optuna_var.set(False)
+                self.optuna_trials_frame.pack_forget()
+        else:
+            self.user_head_frame.pack_forget()
+            if has_optuna:
+                self.optuna_check.configure(state="normal")
+
+    def _on_optuna_change(self):
+        """Show/hide Optuna trials setting based on checkbox."""
+        if self.optuna_var.get():
+            self.optuna_trials_frame.pack(fill="x", pady=5)
+        else:
+            self.optuna_trials_frame.pack_forget()
+
+    def _refresh_training_sessions(self):
+        """Scan logs directory and populate session tree."""
+        self.session_tree.delete(*self.session_tree.get_children())
+        logs_dir = Path(__file__).resolve().parent / "logs"
+        if not logs_dir.exists():
+            return
+
+        for user_dir in sorted(logs_dir.iterdir()):
+            if not user_dir.is_dir():
+                continue
+            user_node = self.session_tree.insert("", "end", text=f"📁 {user_dir.name}", open=False, tags=("user",))
+            sessions = sorted(user_dir.glob("session_*/session_data.csv"))
+            for sess in sessions:
+                sess_name = sess.parent.name
+                self.session_tree.insert(user_node, "end", text=f"  📄 {sess_name}",
+                                          values=(str(sess),), tags=("session",))
+
+    def _select_all_sessions(self):
+        """Select all items in session tree."""
+        def select_recursive(item):
+            self.session_tree.selection_add(item)
+            for child in self.session_tree.get_children(item):
+                select_recursive(child)
+        for item in self.session_tree.get_children():
+            select_recursive(item)
+
+    def _clear_session_selection(self):
+        """Clear all selections in session tree."""
+        self.session_tree.selection_remove(*self.session_tree.selection())
+
+    def _get_selected_session_paths(self):
+        """Get list of selected session CSV paths."""
+        paths = []
+        for item in self.session_tree.selection():
+            tags = self.session_tree.item(item, "tags")
+            if "session" in tags:
+                vals = self.session_tree.item(item, "values")
+                if vals:
+                    paths.append(vals[0])
+            elif "user" in tags:
+                # If user folder selected, include all its sessions
+                for child in self.session_tree.get_children(item):
+                    vals = self.session_tree.item(child, "values")
+                    if vals:
+                        paths.append(vals[0])
+        return list(set(paths))  # Dedupe
+
+    def _log_training(self, msg):
+        """Append message to training log."""
+        self.train_log.configure(state="normal")
+        self.train_log.insert("end", msg + "\n")
+        self.train_log.see("end")
+        self.train_log.configure(state="disabled")
+
+    def _start_training(self):
+        """Start model training as background subprocess."""
+        print("[DEBUG] _start_training called")
+        if self.is_training:
+            self.log("Training already in progress.")
+            return
+        if self.is_running:
+            self.log("Cannot train while a session is running.")
+            return
+
+        selected = self._get_selected_session_paths()
+        print(f"[DEBUG] Selected {len(selected)} sessions")
+        if not selected:
+            self.log("Select at least one session to train on.")
+            return
+
+        train_type = self.train_type_var.get()
+        user_head_name = self.user_head_name_var.get().strip()
+        print(f"[DEBUG] train_type={train_type}, user_head_name='{user_head_name}'")
+        use_optuna = self.optuna_var.get() and train_type == "base"
+        try:
+            optuna_trials = int(self.optuna_trials_var.get())
+        except ValueError:
+            optuna_trials = 30
+
+        if train_type == "user_head" and not user_head_name:
+            self.log("Enter a user name for the head artifact.")
+            print("[DEBUG] Missing user name for user_head training")
+            return
+        
+        print("[DEBUG] Starting training worker thread...")
+
+        # Lock UI
+        self.is_training = True
+        self.btn_train.configure(state="disabled", text="Training...")
+        self.btn_start.configure(state="disabled")
+        self.train_progress.start(10)
+        self.train_status_var.set("Training in progress...")
+        self.train_log.configure(state="normal")
+        self.train_log.delete("1.0", "end")
+        self.train_log.configure(state="disabled")
+
+        mode = f"{train_type} + Optuna ({optuna_trials} trials)" if use_optuna else train_type
+        self._log_training(f"Starting {mode} training with {len(selected)} session(s)...")
+
+        # Run training in background thread
+        def _worker():
+            import subprocess
+            import sys
+            try:
+                # Write sessions to a temp file to avoid command-line length limits on Windows
+                import tempfile
+                sessions_file = tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False, encoding='utf-8')
+                for s in selected:
+                    sessions_file.write(s + '\n')
+                sessions_file.close()
+                
+                if train_type == "base":
+                    # Run train_lgbm.py with selected sessions
+                    script = Path(__file__).resolve().parent.parent / "research" / "LightGBM" / "train_lgbm.py"
+                    cmd = [sys.executable, str(script), "--sessions-file", sessions_file.name]
+                    # Add Optuna optimization if enabled
+                    if use_optuna:
+                        cmd.append("--optimize")
+                        cmd.extend(["--trials", str(optuna_trials)])
+                else:
+                    # Run train_user_head.py with selected sessions
+                    script = Path(__file__).resolve().parent.parent / "research" / "LightGBM" / "train_user_head.py"
+                    cmd = [sys.executable, str(script), "--sessions-file", sessions_file.name, "--suffix", user_head_name.replace(" ", "_")]
+
+                self.root.after(0, lambda: self._log_training(f"Running: {' '.join(cmd)}"))
+
+                proc = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    bufsize=1,
+                    cwd=str(Path(__file__).resolve().parent.parent)
+                )
+                self.training_process = proc
+
+                for line in proc.stdout:
+                    line = line.rstrip()
+                    if line:
+                        self.root.after(0, lambda l=line: self._log_training(l))
+
+                proc.wait()
+                success = proc.returncode == 0
+                self.root.after(0, lambda: self._finish_training(success))
+
+            except Exception as e:
+                self.root.after(0, lambda: self._log_training(f"Error: {e}"))
+                self.root.after(0, lambda: self._finish_training(False))
+            finally:
+                # Cleanup temp sessions file
+                try:
+                    import os
+                    if 'sessions_file' in dir() and sessions_file and os.path.exists(sessions_file.name):
+                        os.unlink(sessions_file.name)
+                except Exception:
+                    pass
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _finish_training(self, success: bool):
+        """Reset UI after training completes."""
+        self.is_training = False
+        self.training_process = None
+        self.train_progress.stop()
+
+        if success:
+            self.train_status_var.set("✓ Training completed successfully!")
+            self._log_training("Training finished successfully.")
+            self.btn_train.configure(text="✓ Done!")
+        else:
+            self.train_status_var.set("✗ Training failed")
+            self._log_training("Training failed. Check log above.")
+            self.btn_train.configure(text="✗ Failed")
+
+        # Restore button after delay
+        self.root.after(2000, self._restore_train_button)
+
+    def _restore_train_button(self):
+        """Restore train button to normal state."""
+        self.btn_train.configure(state="normal", text="🚀 START TRAINING")
+        if not self.is_running:
+            self.btn_start.configure(state="normal")
+
+    def _view_training_results(self):
+        """Open a window displaying training result plots."""
+        results_dir = Path(__file__).resolve().parent.parent / "research" / "LightGBM" / "results" / "plots"
+        
+        if not results_dir.exists():
+            messagebox.showinfo("No Results", "No training results found. Run training first.")
+            return
+        
+        # Find available plots
+        plots = list(results_dir.glob("*.png"))
+        if not plots:
+            messagebox.showinfo("No Results", "No plot images found in results directory.")
+            return
+        
+        # Create results window
+        results_win = tk.Toplevel(self.root)
+        results_win.title("Training Results")
+        results_win.geometry("900x700")
+        results_win.configure(bg=self.P["bg"])
+        
+        # Header
+        header = ttk.Frame(results_win, style="TFrame")
+        header.pack(fill="x", padx=20, pady=(20, 10))
+        ttk.Label(header, text="📊 Model Training Results", style="H1.TLabel").pack(anchor="w")
+        ttk.Label(header, text=f"Found {len(plots)} result plot(s)", style="Sub.TLabel").pack(anchor="w")
+        
+        # Plot selector
+        selector_frame = ttk.Frame(results_win, style="TFrame")
+        selector_frame.pack(fill="x", padx=20, pady=(0, 10))
+        ttk.Label(selector_frame, text="Select Plot:", style="Sub.TLabel").pack(side="left")
+        
+        plot_names = [p.stem for p in sorted(plots)]
+        plot_var = tk.StringVar(value=plot_names[0] if plot_names else "")
+        plot_combo = ttk.Combobox(selector_frame, textvariable=plot_var, values=plot_names, state="readonly", width=40)
+        plot_combo.pack(side="left", padx=(10, 0))
+        
+        # Image display area
+        img_frame = ttk.Frame(results_win, style="Card.TFrame", padding=10)
+        img_frame.pack(fill="both", expand=True, padx=20, pady=(0, 20))
+        
+        img_label = ttk.Label(img_frame, text="Select a plot to view", style="CardLabel.TLabel")
+        img_label.pack(fill="both", expand=True)
+        
+        # Store reference to prevent garbage collection
+        results_win._photo_ref = None
+        
+        def load_plot(*_):
+            selected = plot_var.get()
+            if not selected:
+                return
+            plot_path = results_dir / f"{selected}.png"
+            if not plot_path.exists():
+                return
+            try:
+                from PIL import Image, ImageTk
+                img = Image.open(plot_path)
+                # Scale to fit window while maintaining aspect ratio
+                max_w, max_h = 850, 550
+                img.thumbnail((max_w, max_h), Image.Resampling.LANCZOS)
+                photo = ImageTk.PhotoImage(img)
+                img_label.configure(image=photo, text="")
+                results_win._photo_ref = photo  # Keep reference
+            except ImportError:
+                img_label.configure(text=f"PIL/Pillow not installed.\nPlot saved at:\n{plot_path}", image="")
+            except Exception as e:
+                img_label.configure(text=f"Error loading image: {e}", image="")
+        
+        plot_combo.bind("<<ComboboxSelected>>", load_plot)
+        
+        # Open folder button
+        def open_folder():
+            import os
+            os.startfile(str(results_dir)) if os.name == 'nt' else os.system(f'open "{results_dir}"')
+        
+        ttk.Button(selector_frame, text="📁 Open Folder", command=open_folder, style="Compact.TButton").pack(side="right")
+        
+        # Load first plot
+        if plot_names:
+            results_win.after(100, load_plot)
 
     def show_attack_help(self):
         msg = ("Controls how fast the music SPEEDS UP when you accelerate.\n\n"

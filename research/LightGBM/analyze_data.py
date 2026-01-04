@@ -225,12 +225,33 @@ def _plot_distribution(df: pd.DataFrame, title_prefix: str, output_name: str):
     print(f"Saved '{output_path}'")
 
 
-def analyze_bpm_distribution(logs_dir=None):
+def analyze_bpm_distribution(logs_dir=None, session_paths=None):
     """
     Load sessions, apply the LightGBM preprocessing pipeline, and produce
     two plots: one for raw data and one for processed data.
+    
+    Args:
+        logs_dir: Directory containing session logs (if None, uses default)
+        session_paths: Optional list of specific session CSV paths to analyze
     """
-    raw_df, processed_df = get_raw_and_processed_sessions(logs_dir)
+    if session_paths:
+        # Load specific sessions
+        import pandas as pd
+        from pathlib import Path
+        dfs = []
+        for csv_path in session_paths:
+            if Path(csv_path).exists():
+                df_sess = pd.read_csv(csv_path)
+                df_sess["session_id"] = Path(csv_path).parent.name
+                dfs.append(df_sess)
+        if not dfs:
+            print("No valid session files found.")
+            return
+        raw_df = pd.concat(dfs, ignore_index=True)
+        processed_df = process_walking_data(raw_df)
+    else:
+        # Load all sessions from directory
+        raw_df, processed_df = get_raw_and_processed_sessions(logs_dir)
 
     if raw_df.empty:
         print("No data found.")
