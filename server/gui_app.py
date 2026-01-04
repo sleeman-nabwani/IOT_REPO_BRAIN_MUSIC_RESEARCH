@@ -14,7 +14,9 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 try:
     from utils.plotter import _elapsed_to_seconds, LivePlotter, generate_post_session_plot
     from utils.process_manager import SubprocessManager
+    from utils.comms import send_calibration_command
 except ImportError:
+    send_calibration_command = None
     pass
 
 
@@ -100,6 +102,9 @@ class GuiApp:
         # CHANGED: Gray button for Quit (User Request)
         style.configure("Secondary.TButton", font=("Segoe UI", 10, "bold"), background="#64748b", foreground="white", borderwidth=0, padding=(15, 10))
         style.map("Secondary.TButton", background=[("active", "#475569")])
+        # Success (green) button for calibration
+        style.configure("Success.TButton", font=("Segoe UI", 10, "bold"), background=self.P["success"], foreground="white", borderwidth=0, padding=(15, 10))
+        style.map("Success.TButton", background=[("active", "#16a34a")])
         style.configure("Compact.TButton", background=self.P["input_bg"], foreground=self.P["text_input"], borderwidth=0, padding=(8, 4))
         # INPUTS: Light BG, Dark Text
         style.configure("TEntry", fieldbackground=self.P["input_bg"], foreground=self.P["text_input"], padding=5, borderwidth=0)
@@ -134,6 +139,7 @@ class GuiApp:
         # Live plot uses subplots_adjust; avoid tight_layout in the hot path for FPS stability.
         self._did_tight_layout = True
         self.is_running = False
+        self.is_calibrating = False
         self.is_app_active = True
         # Poll jobs
         self.job_status = None
@@ -353,6 +359,14 @@ class GuiApp:
         ttk.Label(stride_row, text="Steps", style="Sub.TLabel").pack(side="left", padx=(0, 5))
         ttk.Button(stride_row, text="?", style="Help.TButton", width=2, command=self.show_stride_help).pack(side="left", padx=5)
         
+        # Weight Calibration (Advanced)
+        ttk.Label(adv_parent, text="Weight Calibration", style="CardHeader.TLabel").pack(anchor="w", pady=(10, 0))
+        cali_frame = ttk.Frame(adv_parent, style="Card.TFrame")
+        cali_frame.pack(fill="x", pady=5)
+        ttk.Label(cali_frame, text="Margin", style="Sub.TLabel").pack(side="left", padx=(0, 5))
+        self.cal_margin_var = tk.StringVar(value="200")
+        ttk.Entry(cali_frame, textvariable=self.cal_margin_var, width=10).pack(side="left", padx=(0, 5))
+        
         # --- BOTTOM CONTROLS ---
         ttk.Frame(sidebar, style="Card.TFrame").pack(fill="both", expand=True) # Spacer pushes everything down
 
@@ -362,6 +376,9 @@ class GuiApp:
         
         self.btn_stop = ttk.Button(sidebar, text="⏹ STOP SESSION", command=self.stop_session, style="Danger.TButton", state="disabled")
         self.btn_stop.pack(fill="x", pady=(0, 10))
+        
+        self.btn_calibrate = ttk.Button(sidebar, text="✅ CALIBRATE WEIGHT", command=self.on_calibrate_weight, style="Success.TButton")
+        self.btn_calibrate.pack(fill="x", pady=(0, 10))
 
         self.btn_quit = ttk.Button(sidebar, text="❌ QUIT APP", command=self.quit_app, style="Secondary.TButton")
         self.btn_quit.pack(fill="x")
@@ -886,6 +903,84 @@ class GuiApp:
             self.log(f"{type_key.title()} set to {v}")
         except:
             self.log(f"Invalid {type_key} value")
+
+    def on_calibrate_weight(self):
+        """Run calibration without requiring a session; blocks start until done."""
+        if self.is_calibrating:
+            self.log("Calibration already in progress.")
+            return
+        if send_calibration_command is None:
+            self.log("Calibration helper unavailable.")
+            return
+
+        # Derive port (strip description if needed)
+        port_val = self.port_var.get().strip()
+        if not port_val:
+            self.log("Select a serial port first.")
+            return
+        # If combobox value is like "COM3 - desc", take first token
+        port = port_val.split()[0]
+
+        try:
+            margin = int(self.cal_margin_var.get())
+        except ValueError:
+            margin = 200
+            self.log("Invalid margin; using 200.")
+
+        # UI lockout during calibration
+        self.is_calibrating = True
+        self._cal_spinner_idx = 0
+        self.btn_calibrate.configure(state="disabled")
+        self.btn_start.configure(state="disabled")
+        self.btn_stop.configure(state="disabled")
+        self._animate_calibration_spinner()
+
+        def _worker():
+            ok = False
+            try:
+                import serial
+                with serial.Serial(port, 115200, timeout=1.0) as ser:
+                    class _Logger:
+                        def log(self, msg): self_outer.log(msg)
+                    ok = send_calibration_command(ser, _Logger(), margin=margin, retries=3)
+            except Exception as e:
+                self.log(f"Calibration failed: {e}")
+            finally:
+                self.root.after(0, lambda ok=ok: self._finish_calibration(ok))
+
+        self_outer = self
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _animate_calibration_spinner(self):
+        """Animate spinner in calibration button while calibrating."""
+        if not self.is_calibrating:
+            return
+        frames = ("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏")
+        self.btn_calibrate.configure(text=f"Calibrating {frames[self._cal_spinner_idx % len(frames)]}")
+        self._cal_spinner_idx += 1
+        self.root.after(100, self._animate_calibration_spinner)
+
+    def _finish_calibration(self, success: bool):
+        """Reset UI after calibration with brief result flash."""
+        self.is_calibrating = False
+        # Show result briefly
+        if success:
+            self.btn_calibrate.configure(text="✓ Done!", state="disabled")
+            self.log("Calibration completed.")
+        else:
+            self.btn_calibrate.configure(text="✗ Failed", state="disabled")
+        # Restore button after delay
+        self.root.after(1500, self._restore_calibration_button)
+
+    def _restore_calibration_button(self):
+        """Restore calibration button to normal state."""
+        self.btn_calibrate.configure(state="normal", text="✅ CALIBRATE WEIGHT")
+        # Re-enable start; stop remains as-is depending on running state
+        if not self.is_running:
+            self.btn_start.configure(state="normal")
+        else:
+            self.btn_start.configure(state="disabled")
+            self.btn_stop.configure(state="normal")
 
     def show_attack_help(self):
         msg = ("Controls how fast the music SPEEDS UP when you accelerate.\n\n"

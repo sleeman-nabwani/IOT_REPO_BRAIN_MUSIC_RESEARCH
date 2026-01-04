@@ -1,0 +1,39 @@
+Session log started at 2026-01-03_00-09-23 (t=0.000)
+[00:00:00.005] DEBUG: Attempting to initialize MidiBeatSync...
+[00:00:00.426] DEBUG: MidiBeatSync initialized successfully.
+[00:00:00.428] Starting in DYNAMIC MODE
+[00:00:00.429] Run type: dynamic
+[00:00:12.255] Prediction model enabled (LightGBM)
+[00:00:12.257] Session started
+[00:00:12.258] DEBUG: Attempting to open serial port COM3...
+[00:00:12.321] DEBUG: Serial port COM3 opened successfully.
+[00:00:12.823] Setting update stride to 1
+[00:00:12.925] Update stride set response: ACK,STRIDE,1
+[00:00:13.026] ACK,RESET received
+[00:00:13.127] ACK,START received
+[00:00:13.127] Session handshake completed
+[00:00:13.135] Running main loop...
+[00:00:13.139] Calibrating weight with margin=200...
+[00:00:13.340] Unexpected or no ACK (got: 'ERR,CAL_WEIGHT'), retrying...
+[00:00:13.340] Calibrating weight with margin=200...
+[00:00:13.542] Calibration success: ACK,CAL_WEIGHT,DISPATCHED
+[00:00:14.481] Processed: BPM=80.0
+[00:00:18.657] Processed: BPM=14.36
+[00:00:21.994] Processed: BPM=15.97
+[00:00:25.454] Processed: BPM=16.41
+[00:00:25.670] Processed: BPM=25.68
+[00:00:30.844] Processed: BPM=20.34
+[00:00:32.143] Processed: BPM=26.92
+[00:00:32.378] Processed: BPM=26.83
+[00:00:32.893] Processed: BPM=87.89
+[00:00:33.142] Processed: BPM=179.28
+[00:00:33.144] BPM sliding: 58.81 -> 59.96 (Target: 178.94)
+[00:00:33.922] Processed: BPM=116.58
+[00:00:34.114] Processed: BPM=147.54
+[00:00:34.276] Processed: BPM=159.01
+[00:00:34.438] Processed: BPM=349.51
+[00:00:34.440] BPM sliding: 142.54 -> 144.66 (Target: 349.25)
+[00:00:34.600] Processed: BPM=370.37
+[00:00:34.602] BPM sliding: 211.15 -> 213.13 (Target: 383.45)
+[00:00:34.755] Processed: BPM=376.57
+[00:00:34.757] BPM sliding: 266.62 -> 268.09 (Target: 384.34)

@@ -91,6 +91,12 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Enable hybrid mode (starts dynamic, locks if steady)",
     )
+    parser.add_argument(
+        "--calibrate-weight",
+        type=int,
+        default=None,
+        help="Run weight calibration only (provide margin), then exit",
+    )
     return parser.parse_args()
 
 def start_stdin_listener(command_queue):
@@ -113,6 +119,19 @@ def main(args, status_callback=print, stop_event=None, session_dir_callback=None
     smoothing_window = getattr(args, 'smoothing', 3)
     stride = getattr(args, 'stride', 1)
     run_type = "manual" if args.manual else ("hybrid" if getattr(args, "hybrid", False) else "dynamic")
+
+    # Calibration-only flow: open serial, send CAL_WEIGHT, and exit.
+    if getattr(args, "calibrate_weight", None) is not None:
+        margin = int(args.calibrate_weight)
+        class _Logger:
+            def log(self_inner, msg): status_callback(msg)
+        try:
+            with serial.Serial(args.serial_port, 115200, timeout=1.0) as ser:
+                ok = comms.send_calibration_command(ser, _Logger(), margin=margin, retries=3)
+                status_callback("Calibration completed." if ok else "Calibration failed.")
+        except Exception as e:
+            status_callback(f"Calibration error: {e}")
+        return None, None, None
 
     # 1. Initialize Logger 
     logger = Logger(
