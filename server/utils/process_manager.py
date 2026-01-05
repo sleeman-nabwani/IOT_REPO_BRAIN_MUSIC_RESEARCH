@@ -12,7 +12,7 @@ class SubprocessManager:
     - Writes commands to its STDIN.
     - Reads logs from its STDOUT.
     """
-    def __init__(self, midi_path, serial_port, manual_mode, manual_bpm, smoothing_window, stride, log_callback, session_dir_callback, data_callback=None, session_name=None, alpha_up=None, alpha_down=None, hybrid_mode=False, model_path=None):
+    def __init__(self, midi_path, serial_port, manual_mode, manual_bpm, smoothing_window, stride, log_callback, session_dir_callback, data_callback=None, session_name=None, alpha_up=None, alpha_down=None, hybrid_mode=False, model_path=None, startup_mode="music_first", walk_steps=None):
         self.log_callback = log_callback
         self.session_dir_callback = session_dir_callback
         self.data_callback = data_callback
@@ -51,6 +51,12 @@ class SubprocessManager:
         
         if model_path:
             cmd.extend(["--model-path", str(model_path)])
+        
+        # Startup mode parameters
+        if startup_mode == "walk_first":
+            cmd.append("--walk-first")
+            if walk_steps is not None:
+                cmd.extend(["--walk-steps", str(walk_steps)])
         
         # Launch Process
         try:
@@ -122,6 +128,12 @@ class SubprocessManager:
                              self.data_callback(data)
                          except: pass
                      continue
+                
+                # Check for Notification messages
+                if line.startswith("NOTIFICATION:"):
+                    # Pass through with NOTIFICATION: prefix for GUI to handle
+                    self._log(line)
+                    continue
 
                 if line == "EXIT_CLEAN":
                     self.running = False

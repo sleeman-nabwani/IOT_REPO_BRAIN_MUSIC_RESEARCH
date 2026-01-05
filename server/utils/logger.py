@@ -83,11 +83,14 @@ class Logger:
             
     def log_data(
         self, timestamp: float, song_bpm: float, walking_bpm: float, step_event: bool = False, instant_bpm: float | None = None):
-        # Start timer when first data is logged (session actually begins)
-        if not self._timer_started and song_bpm > 0:
+        # Start timer on first data log (calibration or music start)
+        if not self._timer_started:
             self.start_time = timestamp
             self._timer_started = True
-            self.log("Session timer started - music is now playing")
+            if song_bpm > 0:
+                self.log("Session timer started - music is now playing")
+            else:
+                self.log("Session timer started - calibration phase")
         
         elapsed = self._elapsed_str(timestamp)
         ib = instant_bpm if step_event else ""

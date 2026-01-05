@@ -444,6 +444,33 @@ class GuiApp:
         self.subject_var = tk.StringVar()
         self.session_var = tk.StringVar()
         
+        # --- STARTUP MODE ---
+        section("Startup Mode")
+        startup_container = ttk.Frame(sidebar, style="Card.TFrame")
+        startup_container.pack(fill="x", pady=(0, 5))
+        
+        self.startup_mode_var = tk.StringVar(value="music_first")
+        ttk.Radiobutton(startup_container, text="🎵  Music First (Default BPM)", 
+                       value="music_first", variable=self.startup_mode_var,
+                       command=self.on_startup_mode_change).pack(anchor="w", pady=6)
+        ttk.Radiobutton(startup_container, text="🚶  Walk First (Detected BPM)", 
+                       value="walk_first", variable=self.startup_mode_var,
+                       command=self.on_startup_mode_change).pack(anchor="w", pady=6)
+        
+        # Walk steps count input (only shown when walk_first is selected)
+        self.walk_steps_frame = ttk.Frame(sidebar, style="Card.TFrame")
+        walk_steps_row = ttk.Frame(self.walk_steps_frame, style="Card.TFrame")
+        walk_steps_row.pack(fill="x", pady=(5, 0))
+        
+        ttk.Label(walk_steps_row, text="Calibration Steps:", 
+                 style="CardLabel.TLabel", font=("Segoe UI", 9)).pack(side="left", padx=(10, 5))
+        self.walk_steps_var = tk.StringVar(value="10")
+        ttk.Entry(walk_steps_row, textvariable=self.walk_steps_var, 
+                 width=8, font=("Segoe UI", 10)).pack(side="left", padx=(0, 5))
+        ttk.Label(walk_steps_row, text="steps", 
+                 style="CardLabel.TLabel", font=("Segoe UI", 9)).pack(side="left")
+        # Initially hidden
+        
         # --- ADVANCED SETTINGS (COLLAPSIBLE) ---
         self.advanced_pane = CollapsiblePane(sidebar, title="Advanced Settings", expanded=False)
         self.advanced_pane.pack(fill="x", pady=(15, 0), anchor="w")
@@ -632,6 +659,19 @@ class GuiApp:
         canvas_widget = self.canvas.get_tk_widget()
         canvas_widget.configure(borderwidth=0, highlightthickness=0, relief="flat")
         canvas_widget.pack(fill="both", expand=True)
+        
+        # Notification Label (Top-right overlay) - Initially hidden
+        self.notification_label = tk.Label(
+            tab_session, 
+            text="",
+            font=("Segoe UI", 11, "bold"),
+            fg="white",
+            bg=self.P["warning"],
+            padx=15,
+            pady=10,
+            relief="solid",
+            borderwidth=2
+        )
 
         # -------------------- TAB 2: MODEL TRAINING --------------------
         tab_training = ttk.Frame(self.main_notebook, style="TFrame")
@@ -776,6 +816,13 @@ class GuiApp:
             
             if self.session_thread: self.session_thread.set_manual_mode(False)
 
+    def on_startup_mode_change(self):
+        """Show/hide walk steps input based on startup mode selection."""
+        if self.startup_mode_var.get() == "walk_first":
+            self.walk_steps_frame.pack(fill="x", pady=(0, 10), after=self.walk_steps_frame.master.winfo_children()[self.walk_steps_frame.master.winfo_children().index(self.walk_steps_frame)-1])
+        else:
+            self.walk_steps_frame.pack_forget()
+
     def start_session(self):
         """Action for the 'START SESSION' button."""
         if self.is_running: return
@@ -847,6 +894,15 @@ class GuiApp:
         # Get selected prediction model path
         model_path = self.get_selected_model_path()
         
+        # Get startup mode parameters
+        startup_mode = self.startup_mode_var.get()
+        walk_steps = None
+        if startup_mode == "walk_first":
+            try:
+                walk_steps = int(self.walk_steps_var.get())
+            except:
+                walk_steps = 10  # Default
+        
         # Create and start the Subprocess Manager
         self.session_thread = SubprocessManager(
             str(p),
@@ -863,6 +919,8 @@ class GuiApp:
             alpha_down=ad,
             hybrid_mode=(self.mode_var.get() == "hybrid"),
             model_path=model_path,
+            startup_mode=startup_mode,
+            walk_steps=walk_steps,
         )
         
         # Update UI state
@@ -1946,6 +2004,23 @@ class GuiApp:
         
         self.log(f"Switched to {self.theme_mode.title()} Mode")
 
+    # ====================== NOTIFICATION SYSTEM ======================
+    def show_notification(self, message, duration=5000):
+        """Display a temporary notification at the top-right of the session tab."""
+        if not hasattr(self, 'notification_label'):
+            return
+        self.notification_label.configure(text=message, bg=self.P["warning"])
+        self.notification_label.place(relx=0.98, rely=0.02, anchor="ne")
+        
+        # Auto-hide after duration
+        if duration > 0:
+            self.root.after(duration, self.hide_notification)
+
+    def hide_notification(self):
+        """Hide the notification."""
+        if hasattr(self, 'notification_label'):
+            self.notification_label.place_forget()
+
     def _update_widget_colors(self, widget):
         """Recursively update widget backgrounds for theme."""
         try:
@@ -2208,7 +2283,18 @@ class GuiApp:
         if not self.is_app_active: return
 
         while not self.status_queue.empty():
-            self.log(self.status_queue.get_nowait())
+            msg = self.status_queue.get_nowait()
+            # Check for notification command
+            if msg.startswith("NOTIFICATION:"):
+                notification_text = msg.split(":", 1)[1]
+                # Add emojis for visual feedback
+                if "System ready" in notification_text or "Music started" in notification_text:
+                    notification_text = "✅ " + notification_text
+                elif "begin walking" in notification_text.lower() or "Collecting" in notification_text:
+                    notification_text = "⚠️ " + notification_text
+                self.show_notification(notification_text, duration=5000)
+            else:
+                self.log(msg)  # Regular log message
         self.job_status = self.root.after(200, self.poll_status)
         
     def poll_session_dir(self):
