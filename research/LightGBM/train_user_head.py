@@ -10,17 +10,33 @@ Usage:
     python train_user_head.py --user "Sonic wesh wesh" [--base-model ...] [--suffix user123]
 """
 import argparse
+import importlib.util
 from pathlib import Path
 
 import pandas as pd
 
 from train_lgbm import (
-    filter_bpm_range,
-    filter_true_steps,
     train_user_calibration,
-    load_all_sessions,
     BASE_DIR,
 )
+
+# Import load_all_sessions from parent analyze_data.py
+PARENT_ANALYZE = Path(__file__).resolve().parent.parent / "analyze_data.py"
+spec = importlib.util.spec_from_file_location("research_analyze_data", PARENT_ANALYZE)
+parent_mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(parent_mod)
+load_all_sessions = parent_mod.load_all_sessions
+
+
+def _load_sessions_from_file(filepath: str) -> list[str]:
+    """Load session paths from a file (one path per line)."""
+    paths = []
+    with open(filepath, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if line and Path(line).exists():
+                paths.append(line)
+    return paths
 
 
 def main():
@@ -34,6 +50,18 @@ def main():
         help="User name; looks under server/logs/<user> for session_data.csv files.",
     )
     parser.add_argument(
+        "--sessions",
+        nargs="+",
+        default=None,
+        help="Specific session CSV paths to train on.",
+    )
+    parser.add_argument(
+        "--sessions-file",
+        type=str,
+        default=None,
+        help="Path to a file containing session CSV paths (one per line).",
+    )
+    parser.add_argument(
         "--base-model",
         default=str(Path(__file__).parent / "results" / "models" / "lgbm_model.joblib"),
         help="Path to base LightGBM model artifact (joblib).",
@@ -41,30 +69,49 @@ def main():
     parser.add_argument("--suffix", default="user", help="Identifier suffix for the saved head file.")
     args = parser.parse_args()
 
-    if not args.path and not args.user:
-        raise ValueError("Provide either --path or --user.")
+    # Load sessions from file if specified
+    session_paths = args.sessions
+    if args.sessions_file:
+        session_paths = _load_sessions_from_file(args.sessions_file)
+        print(f"Loaded {len(session_paths)} session paths from file.")
 
-    if args.user and not args.path:
+    # Load data from specified sources
+    if session_paths:
+        # Load specific session CSVs
+        print(f"Loading {len(session_paths)} specified session(s)...")
+        dfs = []
+        for csv_path in session_paths:
+            if Path(csv_path).exists():
+                df_sess = pd.read_csv(csv_path)
+                df_sess["session_id"] = Path(csv_path).parent.name
+                dfs.append(df_sess)
+        if not dfs:
+            raise ValueError("No valid session files found.")
+        df = pd.concat(dfs, ignore_index=True)
+    elif args.user:
         user_path = BASE_DIR / "server" / "logs" / args.user
-    else:
-        user_path = Path(args.path)
-
-    if not user_path.exists():
-        raise FileNotFoundError(f"User path not found: {user_path}")
-
-    if user_path.is_dir():
-        # Load all session_data.csv under this directory
+        if not user_path.exists():
+            raise FileNotFoundError(f"User path not found: {user_path}")
         df = load_all_sessions(str(user_path))
+    elif args.path:
+        user_path = Path(args.path)
+        if not user_path.exists():
+            raise FileNotFoundError(f"Path not found: {user_path}")
+        if user_path.is_dir():
+            df = load_all_sessions(str(user_path))
+        else:
+            df = pd.read_csv(user_path)
+            if "session_id" not in df.columns:
+                df["session_id"] = "user_session"
     else:
-        df = pd.read_csv(user_path)
-        if "session_id" not in df.columns:
-            df["session_id"] = "user_session"
+        raise ValueError("Provide --sessions, --path, or --user.")
 
     if "walking_bpm" not in df.columns:
         raise ValueError("Data must contain 'walking_bpm' column.")
 
-    df = filter_bpm_range(df)
-    df = filter_true_steps(df)
+    print(f"Training user head on {len(df)} data points from {df['session_id'].nunique()} session(s).")
+
+    # train_user_calibration internally calls process_walking_data which handles filtering
     calibrator, head_path = train_user_calibration(
         df,
         base_model_path=Path(args.base_model),
