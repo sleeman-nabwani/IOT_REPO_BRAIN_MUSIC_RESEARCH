@@ -29,6 +29,23 @@ def send_config_command(ser: serial.Serial, logger: Logger, cmd_prefix: str,
     logger.log(f"Failed to set {desc} after {retries} attempts")
     return False
 
+def send_calibration_command(ser: serial.Serial, logger: Logger | None = None, margin: int = 150, retries: int = 3) -> bool:
+    """Send weight calibration command to the receiver and wait for ACK."""
+    log = logger.log if logger else print
+    cmd = f"CAL_WEIGHT,{int(margin)}\n".encode("utf-8")
+    for _ in range(retries):
+        log(f"Calibrating weight with margin={margin}...")
+        ser.write(cmd)
+        time.sleep(0.2)
+        resp = ser.readline()
+        resp_str = resp.decode("utf-8", errors="ignore").strip() if resp else ""
+        if resp_str.startswith("ACK,CAL_WEIGHT"):
+            log(f"Calibration success: {resp_str}")
+            return True
+        log(f"Unexpected or no ACK (got: {resp_str!r}), retrying...")
+    log("Calibration failed after retries")
+    return False
+
 def send_handshake_command(ser: serial.Serial, logger: Logger, command: bytes, expected_ack: str, retries: int = 5) -> bool:
     """Helper to send handshake commands and wait for ACK."""
     for _ in range(retries):
@@ -110,9 +127,12 @@ def handle_engine_command(cmd, ser, logger, bpm_estimation, player):
                     send_config_command(ser, logger, "SET_WINDOW", int(val), "steps window", "ACK,WINDOW")
                 elif key == "SET_STRIDE":
                     send_config_command(ser, logger, "SET_STRIDE", int(val), "update stride", "ACK,STRIDE")
+                elif key == "CAL_WEIGHT":
+                    send_calibration_command(ser, logger, int(val) if val else 200)
             except ValueError:
                 logger.log(f"Invalid command format: {cmd}")
         elif cmd == "QUIT":
             return True
     return False
+
 

@@ -22,10 +22,10 @@ PLOTS_DIR.mkdir(parents=True, exist_ok=True)
 def _read_session(csv_path: str):
     """
     Read a single session CSV, parse optional # meta line for params,
-    attach session_id, smoothing_window, stride.
+    attach session_id, smoothing_window, stride, run_type.
     """
     session_id = Path(csv_path).parent.name
-    meta = {"smoothing_window": 3, "stride": 1}
+    meta = {"smoothing_window": 3, "stride": 1, "run_type": "dynamic"}
     # Read first line for meta
     try:
         with open(csv_path, "r", encoding="utf-8") as f:
@@ -46,6 +46,7 @@ def _read_session(csv_path: str):
     df["session_id"] = session_id
     df["smoothing_window"] = meta.get("smoothing_window", 3)
     df["stride"] = meta.get("stride", 1)
+    df["run_type"] = str(meta.get("run_type", "dynamic"))
     return df
 
 

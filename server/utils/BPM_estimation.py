@@ -3,11 +3,14 @@ import threading
 from .midi_player import MidiBeatSync
 from .logger import Logger
 from .LGBM_predictor import LGBMPredictor
+from collections import deque
+from statistics import mean, stdev
 
 class BPM_estimation:
     def __init__(self, player: MidiBeatSync, logger: Logger, manual_mode: bool = False,
                 manual_bpm: float = None, prediction_model: LGBMPredictor = None,
-                smoothing_window: int = 3, stride: int = 1) -> None:
+                smoothing_window: int = 3, stride: int = 1,
+                run_type: str | None = None, hybrid_mode: bool = False) -> None:
         self.last_msg_time = time.time()
         self.player = player
         self.logger = logger
@@ -23,7 +26,16 @@ class BPM_estimation:
         self._warmup_thread = None
         self.smoothing_window = smoothing_window
         self.stride = stride
+        self.run_type = run_type or "dynamic"
         
+        # Hybrid Mode (Cruise Control)
+        self.hybrid_mode = hybrid_mode
+        self.stability_buffer = deque(maxlen=10) # 5 steps to determine initial lock
+        self.unlock_buffer = deque(maxlen=3)     # 3 steps to determine unlock (average)
+        self.locked_bpm = 0.0
+        self.unlock_start_time = None
+        self.UNLOCK_DURATION = 1.0 # Seconds of sustained deviation to unlock
+
         # TARGET BPM: This is where we WANT to be.
         # The 'walkingBPM' is where we ARE currently.
         # We will smoothly slide 'walkingBPM' -> 'target_bpm' every loop.
@@ -57,6 +69,31 @@ class BPM_estimation:
     def set_manual_mode(self, enabled: bool):
         """Switch between manual and dynamic modes at runtime."""
         self.manual_mode = bool(enabled)
+        # Reset buffers on manual switch to avoid instant re-trigger
+        if enabled:
+           self.stability_buffer.clear()
+        else:
+           self.unlock_buffer.clear()
+           self.unlock_start_time = None
+
+    def register_button_delta(self, delta: float):
+        """
+        Called when a physical button press (delta) is received.
+        Only applies change if in Manual Mode (or Hybrid-Locked).
+        """
+        if self.manual_mode:
+            current_bpm = self.player.walkingBPM
+            new_bpm = current_bpm + delta
+            new_bpm = max(40, min(240, new_bpm)) # Safety Clamp
+            
+            # Apply immediately
+            self.player.set_BPM(new_bpm)
+            self.target_bpm = new_bpm
+            self.locked_bpm = new_bpm # Update lock target too
+            
+            self.logger.log(f"MANUAL: Adjusted BPM to {new_bpm:.1f} (Delta {delta})")
+            return new_bpm
+        return None
 
     def check_manual_bpm_update(self):
         # Return pending BPM if set, and clear it
@@ -72,6 +109,43 @@ class BPM_estimation:
         Instead of changing music instantly, we just update the TARGET.
         The update_bpm() loop will handle the smooth transition.
         """
+        # HYBRID MODE LOGIC
+        if self.hybrid_mode:
+            # 1. We are currently in DYNAMIC mode -> Check if we should LOCK
+            if not self.manual_mode:
+                self.stability_buffer.append(new_bpm)
+                if len(self.stability_buffer) == self.stability_buffer.maxlen:
+                    # Calculate deviation
+                    try:
+                        dev = stdev(self.stability_buffer)
+                    except: # handle potential math errors (e.g. constant values)
+                        dev = 0.0
+                    
+                    # If stable (stddev < 3 BPM), lock it!
+                    if dev < 5.0:
+                        start_time = time.time()
+                        # Lock to the MEAN of the buffer
+                        avg_bpm = mean(self.stability_buffer)
+                        self.locked_bpm = avg_bpm
+                        self.set_manual_mode(True)
+                        self.set_manual_bpm(self.locked_bpm) # Queue update for main loop
+                        self.logger.log(f"cruise_control: Locked at {avg_bpm:.1f} BPM (StdDev: {dev:.2f})")
+                        
+            # 2. We are currently in LOCKED (Manual) mode -> Check if we should UNLOCK
+            elif self.manual_mode:
+                self.unlock_buffer.append(new_bpm)
+                if len(self.unlock_buffer) == self.unlock_buffer.maxlen:
+                    current_avg = mean(self.unlock_buffer)
+                    
+                    # Check deviation from locked BPM
+                    if abs(current_avg - self.locked_bpm) > 8.0:
+                            # UNLOCK:
+                            self.set_manual_mode(False)
+                            self.logger.log(f"cruise_control: Disengaged (Avg: {current_avg:.1f} vs Locked: {self.locked_bpm:.1f})")
+                            self.unlock_start_time = None
+                    else:
+                        # Back to stable, reset timer
+                        self.unlock_start_time = None
         self.target_bpm = new_bpm
         self.last_recorded_bpm = new_bpm
         self.last_msg_time = time.time() # Reset the decay timer
@@ -84,6 +158,7 @@ class BPM_estimation:
                 pred = self.prediction_model.predict_next(
                     smoothing_window=self.smoothing_window,
                     stride=self.stride,
+                    run_type=self.run_type,
                 )
                 if pred is not None:
                     # Blend to avoid sudden jumps while still using fresh prediction.
@@ -93,7 +168,7 @@ class BPM_estimation:
 
     def _run_warmup(self, initial_bpm: float | None):
         try:
-            self.prediction_model.warmup(initial_bpm)
+            self.prediction_model.warmup(initial_bpm, run_type=self.run_type)
         except Exception:
             self._warmup_failed = True
         finally:
@@ -112,8 +187,9 @@ class BPM_estimation:
         It moves the current BPM a tiny bit closer to the Target BPM every time.
         """
         now_ts = time.time()
+        dt = now_ts - self.last_update_time
+        self.last_update_time = now_ts
 
-        # Manual mode: still emit data every loop so the graph updates even without steps.
         if self.manual_mode:
             if now_ts - self.last_gui_log_time > 0.1:
                 try:
@@ -136,10 +212,6 @@ class BPM_estimation:
         # 4. Smoothing Logic (Target Seeking)
         # We slide the current music BPM towards the Target BPM.
         current_bpm = self.player.walkingBPM
-        
-        # Calculate Delta Time (dt)
-        dt = now_ts - self.last_update_time
-        self.last_update_time = now_ts
         
         # optimized strictness: only update if diff is > 0.1
         diff = abs(self.target_bpm - current_bpm)
@@ -167,7 +239,7 @@ class BPM_estimation:
                 # Deceleration (Decay)
                 alpha = self.smoothing_alpha_down
 
-            speed_factor = alpha * 25.0 
+            speed_factor = alpha * 25.0
             
             # Simple Linear Interpolation
             step = (self.target_bpm - current_bpm) * speed_factor * dt

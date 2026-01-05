@@ -7,5 +7,3 @@ python-rtmidi
 scikit-learn
 lightgbm
 optuna
-xgboost
-catboost

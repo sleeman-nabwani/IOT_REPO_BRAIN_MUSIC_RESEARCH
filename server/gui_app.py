@@ -14,7 +14,9 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 try:
     from utils.plotter import _elapsed_to_seconds, LivePlotter, generate_post_session_plot
     from utils.process_manager import SubprocessManager
+    from utils.comms import send_calibration_command
 except ImportError:
+    send_calibration_command = None
     pass
 
 
@@ -30,6 +32,38 @@ except ImportError:
 # ==================================================================================
 
 
+# --- HELPER CLASS FOR COLLAPSIBLE SECTIONS ---
+class CollapsiblePane(ttk.Frame):
+    def __init__(self, parent, title="", expanded=False, style_prefix=""):
+        super().__init__(parent, style="Card.TFrame")
+        self.parent = parent
+        self.expanded = expanded
+        self.title = title
+        
+        # Toggle Button with improved styling
+        self.toggle_btn = ttk.Button(self, text=self._get_title(), command=self.toggle, 
+                                     style="Compact.TButton")
+        self.toggle_btn.pack(fill="x", pady=(0, 5))
+        
+        # Content Frame (Hidden by default)
+        self.content_frame = ttk.Frame(self, style="Card.TFrame")
+        
+        if expanded:
+            self.content_frame.pack(fill="x", expand=True, pady=(5, 0))
+
+    def _get_title(self):
+        arrow = "▼" if self.expanded else "▶"
+        return f"{arrow}  {self.title}"
+
+    def toggle(self):
+        self.expanded = not self.expanded
+        self.toggle_btn.configure(text=self._get_title())
+        if self.expanded:
+            self.content_frame.pack(fill="x", expand=True, pady=(5, 0))
+        else:
+            self.content_frame.pack_forget()
+
+
 class GuiApp:
     def __init__(self, root: tk.Tk):
         self.root = root
@@ -37,54 +71,179 @@ class GuiApp:
         root.geometry("1100x850")
         
         # --- THEME CONFIGURATION ---
-        # Defines the Slate/Dark color palette for a modern look.
-        self.P = {
-            "bg": "#0f172a", "card_bg": "#1e293b", "input_bg": "#f1f5f9", # Light BG for inputs
-            "text_main": "#f8fafc", "text_sub": "#94a3b8", "text_input": "#0f172a", # Black/Dark text for inputs
-            "accent": "#3b82f6", "accent_hover": "#2563eb",
-            "danger": "#ef4444", "success": "#22c55e", "warning": "#eab308",
-            "border": "#334155",
+        # Define both light and dark themes
+        self.theme_mode = "dark"  # Default to dark mode
+        self.themes = {
+            "dark": {
+                "bg": "#0a0e27", "card_bg": "#141b3a", "input_bg": "#070b1a",
+                "text_main": "#ffffff", "text_sub": "#8b92b8", "text_input": "#e2e8f0",
+                "accent": "#6366f1", "accent_hover": "#4f46e5",
+                "danger": "#ef4444", "success": "#10b981", "warning": "#f59e0b",
+                "border": "#0a0e27", "shadow": "#050812", "highlight": "#2a3454",
+                "plot_bg": "#1a2341",
+            },
+            "light": {
+                "bg": "#e8ecf4", "card_bg": "#ffffff", "input_bg": "#f8fafc",
+                "text_main": "#0f172a", "text_sub": "#64748b", "text_input": "#0f172a",
+                "accent": "#6366f1", "accent_hover": "#4f46e5",
+                "danger": "#ef4444", "success": "#10b981", "warning": "#f59e0b",
+                "border": "#cbd5e1", "shadow": "#94a3b8", "highlight": "#dbeafe",
+                "plot_bg": "#fafbfc",
+            }
         }
-        # TWEAK: To change the background color, edit "bg" above.
-        # TWEAK: To change the button color, edit "accent" above.
+        self.P = self.themes[self.theme_mode]
         root.configure(bg=self.P["bg"])
 
         # --- STYLE SETUP ---
-        # ttk.Style allows us to customize how buttons and labels look globally.
+        # Enhanced professional styling
         style = ttk.Style()
         try: style.theme_use("clam")
         except: pass
-        style.configure(".", background=self.P["bg"], foreground=self.P["text_main"], font=("Segoe UI", 10))
-        style.configure("TFrame", background=self.P["bg"])
-        style.configure("Card.TFrame", background=self.P["card_bg"], relief="flat")
-        style.configure("H1.TLabel", font=("Segoe UI", 18, "bold"), foreground=self.P["text_main"], background=self.P["bg"])
-        style.configure("CardHeader.TLabel", font=("Segoe UI", 12, "bold"), foreground=self.P["text_sub"], background=self.P["card_bg"])
-        style.configure("Sub.TLabel", font=("Segoe UI", 11), foreground=self.P["text_sub"], background=self.P["bg"])
-        style.configure("CardLabel.TLabel", background=self.P["card_bg"], foreground=self.P["text_main"])
-        style.configure("NavStatus.TLabel", background=self.P["bg"], foreground=self.P["accent"], font=("Segoe UI", 9, "italic"))
-        style.configure("Primary.TButton", font=("Segoe UI", 10, "bold"), background=self.P["accent"], foreground="white", borderwidth=0, focuscolor=self.P["accent"], padding=(15, 10))
-        style.map("Primary.TButton", background=[("active", self.P["accent_hover"])])
-        style.configure("Danger.TButton", font=("Segoe UI", 10, "bold"), background=self.P["danger"], foreground="white", borderwidth=0, padding=(15, 10))
-        style.map("Danger.TButton", background=[("active", "#b91c1c")])
-        # CHANGED: Gray button for Quit (User Request)
-        style.configure("Secondary.TButton", font=("Segoe UI", 10, "bold"), background="#64748b", foreground="white", borderwidth=0, padding=(15, 10))
-        style.map("Secondary.TButton", background=[("active", "#475569")])
-        style.configure("Compact.TButton", background=self.P["input_bg"], foreground=self.P["text_input"], borderwidth=0, padding=(8, 4))
-        # INPUTS: Light BG, Dark Text
-        style.configure("TEntry", fieldbackground=self.P["input_bg"], foreground=self.P["text_input"], padding=5, borderwidth=0)
-        style.configure("TCombobox", fieldbackground=self.P["input_bg"], foreground=self.P["text_input"], background=self.P["input_bg"])
-        style.map("TCombobox", fieldbackground=[("readonly", self.P["input_bg"])], foreground=[("readonly", self.P["text_input"])])
         
-        style.configure("TRadiobutton", background=self.P["card_bg"], foreground=self.P["text_main"], font=("Segoe UI", 10))
-        style.map("TRadiobutton", indicatorcolor=[("selected", self.P["accent"])], background=[("active", self.P["card_bg"])])
-
-        # NEW: Compact Blue Button for "Set"
-        style.configure("CompactPrimary.TButton", font=("Segoe UI", 9, "bold"), background=self.P["accent"], foreground="white", borderwidth=0, padding=(8, 4))
+        # Base styles
+        style.configure(".", background=self.P["bg"], foreground=self.P["text_main"], font=("Segoe UI", 10))
+        style.configure("TFrame", background=self.P["bg"], relief="flat", borderwidth=0, highlightthickness=0)
+        style.configure("Card.TFrame", background=self.P["card_bg"], relief="flat", borderwidth=0, highlightthickness=0)
+        
+        # Typography - Enhanced hierarchy
+        style.configure("H1.TLabel", font=("Segoe UI", 24, "bold"), foreground=self.P["text_main"], background=self.P["bg"])
+        style.configure("CardHeader.TLabel", font=("Segoe UI", 11, "bold"), foreground=self.P["accent"], background=self.P["card_bg"], 
+                       padding=(0, 5))
+        style.configure("Sub.TLabel", font=("Segoe UI", 10), foreground=self.P["text_sub"], background=self.P["bg"])
+        style.configure("CardLabel.TLabel", background=self.P["card_bg"], foreground=self.P["text_main"], font=("Segoe UI", 10))
+        style.configure("NavStatus.TLabel", background=self.P["bg"], foreground=self.P["accent"], font=("Segoe UI", 10, "bold"))
+        
+        # Button styles - More professional with better spacing
+        style.configure("Primary.TButton", font=("Segoe UI", 11, "bold"), background=self.P["accent"], 
+                       foreground="white", borderwidth=0, focuscolor=self.P["accent"], padding=(20, 14))
+        style.map("Primary.TButton", background=[("active", self.P["accent_hover"]), ("disabled", "#3b3f5c")])
+        
+        style.configure("Danger.TButton", font=("Segoe UI", 11, "bold"), background=self.P["danger"], 
+                       foreground="white", borderwidth=0, padding=(20, 14))
+        style.map("Danger.TButton", background=[("active", "#dc2626"), ("disabled", "#3b3f5c")])
+        
+        style.configure("Secondary.TButton", font=("Segoe UI", 11, "bold"), background="#475569", 
+                       foreground="white", borderwidth=0, padding=(20, 14))
+        style.map("Secondary.TButton", background=[("active", "#334155"), ("disabled", "#3b3f5c")])
+        
+        style.configure("Success.TButton", font=("Segoe UI", 11, "bold"), background=self.P["success"], 
+                       foreground="white", borderwidth=0, padding=(20, 14))
+        style.map("Success.TButton", background=[("active", "#059669"), ("disabled", "#3b3f5c")])
+        
+        style.configure("Compact.TButton", background=self.P["input_bg"], foreground=self.P["text_input"], 
+                       borderwidth=0, padding=(10, 6), font=("Segoe UI", 9))
+        style.map("Compact.TButton", background=[("active", "#e5e7eb")])
+        
+        style.configure("CompactPrimary.TButton", font=("Segoe UI", 9, "bold"), background=self.P["accent"], 
+                       foreground="white", borderwidth=0, padding=(10, 6))
         style.map("CompactPrimary.TButton", background=[("active", self.P["accent_hover"])])
         
-        # New: Help Button Style (Ghost)
-        style.configure("Help.TButton", font=("Segoe UI", 9, "bold"), background=self.P["card_bg"], foreground=self.P["accent"], borderwidth=0, padding=(2, 0))
-        style.map("Help.TButton", background=[("active", self.P["card_bg"])], foreground=[("active", "white")])
+        style.configure("Help.TButton", font=("Segoe UI", 9, "bold"), background=self.P["card_bg"], 
+                       foreground=self.P["accent"], borderwidth=0, padding=(4, 2))
+        style.map("Help.TButton", background=[("active", self.P["highlight"])], foreground=[("active", "white")])
+        
+        # Theme toggle button - integrated with navbar
+        style.configure("Theme.TButton", font=("Segoe UI", 16), background=self.P["bg"], 
+                       foreground=self.P["text_main"], borderwidth=0, padding=(8, 6))
+        style.map("Theme.TButton", background=[("active", self.P["highlight"])], 
+                 foreground=[("active", self.P["accent"])])
+
+        # Input styles - Clean and modern with no outlines
+        style.configure("TEntry", 
+                       fieldbackground=self.P["input_bg"], 
+                       foreground=self.P["text_input"], 
+                       padding=8, 
+                       borderwidth=0, 
+                       relief="flat", 
+                       highlightthickness=0,
+                       insertcolor=self.P["text_input"],
+                       bordercolor=self.P["card_bg"],
+                       lightcolor=self.P["card_bg"],
+                       darkcolor=self.P["card_bg"],
+                       focuscolor="")
+        style.map("TEntry",
+                 fieldbackground=[("focus", self.P["input_bg"])],
+                 bordercolor=[("focus", self.P["card_bg"])],
+                 lightcolor=[("focus", self.P["card_bg"])],
+                 darkcolor=[("focus", self.P["card_bg"])])
+        
+        style.configure("TCombobox", 
+                       fieldbackground=self.P["input_bg"], 
+                       foreground=self.P["text_input"], 
+                       background=self.P["card_bg"], 
+                       padding=5, 
+                       borderwidth=0, 
+                       arrowsize=15, 
+                       relief="flat", 
+                       highlightthickness=0,
+                       bordercolor=self.P["card_bg"],
+                       lightcolor=self.P["card_bg"],
+                       darkcolor=self.P["card_bg"],
+                       focuscolor="",
+                       insertwidth=0)
+        style.map("TCombobox", 
+                 fieldbackground=[("readonly", self.P["input_bg"])], 
+                 foreground=[("readonly", self.P["text_input"])],
+                 background=[("readonly", self.P["card_bg"])],
+                 bordercolor=[("focus", self.P["card_bg"]), ("!focus", self.P["card_bg"])],
+                 lightcolor=[("focus", self.P["card_bg"]), ("!focus", self.P["card_bg"])],
+                 darkcolor=[("focus", self.P["card_bg"]), ("!focus", self.P["card_bg"])])
+        
+        # Radio buttons
+        style.configure("TRadiobutton", background=self.P["card_bg"], foreground=self.P["text_main"], 
+                       font=("Segoe UI", 10), padding=8,
+                       borderwidth=0, relief="flat", highlightthickness=0)
+        style.map("TRadiobutton", indicatorcolor=[("selected", self.P["accent"])], 
+                 background=[("active", self.P["card_bg"])])
+
+        # Checkbutton styles
+        style.configure("TCheckbutton", background=self.P["bg"], foreground=self.P["text_main"], 
+                       font=("Segoe UI", 10), padding=5,
+                       borderwidth=0, relief="flat", highlightthickness=0)
+        style.map("TCheckbutton", indicatorcolor=[("selected", self.P["accent"])],
+                 background=[("active", self.P["bg"])])
+
+        # Other components - all borderless
+        style.configure("TPanedwindow", background=self.P["bg"], borderwidth=0, relief="flat")
+        style.configure("TSeparator", background=self.P["border"])
+        style.configure("CardSub.TLabel", font=("Segoe UI", 9), foreground=self.P["text_sub"], 
+                       background=self.P["card_bg"])
+        
+        # Treeview - completely borderless
+        style.configure("Treeview", background=self.P["card_bg"], foreground=self.P["text_main"],
+                       fieldbackground=self.P["card_bg"], borderwidth=0, rowheight=30,
+                       relief="flat", highlightthickness=0,
+                       bordercolor=self.P["card_bg"],
+                       lightcolor=self.P["card_bg"],
+                       darkcolor=self.P["card_bg"])
+        style.configure("Treeview.Heading",
+                       background=self.P["card_bg"],
+                       foreground=self.P["text_main"],
+                       borderwidth=0,
+                       relief="flat")
+        style.map("Treeview", background=[("selected", self.P["accent"])], foreground=[("selected", "white")])
+        
+        # Progressbar
+        style.configure("TProgressbar", troughcolor=self.P["border"], background=self.P["accent"], 
+                       borderwidth=0, thickness=8)
+        
+        # Scale (Slider) styling
+        style.configure("TScale", background=self.P["card_bg"], troughcolor=self.P["border"], 
+                       borderwidth=0, sliderlength=25, sliderrelief="flat")
+        
+        # Scrollbar styling - make it blend in
+        style.configure("Vertical.TScrollbar", 
+                       background=self.P["card_bg"],
+                       troughcolor=self.P["card_bg"],
+                       borderwidth=0,
+                       arrowsize=0,
+                       relief="flat")
+        style.configure("Horizontal.TScrollbar", 
+                       background=self.P["card_bg"],
+                       troughcolor=self.P["card_bg"],
+                       borderwidth=0,
+                       arrowsize=0,
+                       relief="flat")
 
         base_dir = Path(__file__).resolve().parent.parent
         default_midi = base_dir / "midi_files" / "Technion_March1.mid"
@@ -103,6 +262,7 @@ class GuiApp:
         # Live plot uses subplots_adjust; avoid tight_layout in the hot path for FPS stability.
         self._did_tight_layout = True
         self.is_running = False
+        self.is_calibrating = False
         self.is_app_active = True
         # Poll jobs
         self.job_status = None
@@ -113,41 +273,67 @@ class GuiApp:
         self.port_scan_thread = None
 
 
+        self.port_scan_thread = None
 
-        # --- LAYOUT ---
+    # --- LAYOUT ---
+        # Enhanced navbar with gradient-like effect
         navbar = ttk.Frame(root, style="TFrame")
-        navbar.pack(fill="x", padx=25, pady=(20, 10))
+        navbar.pack(fill="x", padx=30, pady=(25, 15))
         
         title_box = ttk.Frame(navbar, style="TFrame")
         title_box.pack(side="left")
-        ttk.Label(title_box, text="⚡ BRAIN SYNC", style="H1.TLabel").pack(anchor="w")
-        ttk.Label(title_box, text="Neuro-Adaptive Music Controller", style="Sub.TLabel").pack(anchor="w")
         
+        # Add subtle icon/branding
+        header_frame = ttk.Frame(title_box, style="TFrame")
+        header_frame.pack(anchor="w")
+        ttk.Label(header_frame, text="🧠", style="H1.TLabel", font=("Segoe UI", 32)).pack(side="left", padx=(0, 12))
+        title_text_frame = ttk.Frame(header_frame, style="TFrame")
+        title_text_frame.pack(side="left")
+        ttk.Label(title_text_frame, text="BRAIN SYNC", style="H1.TLabel").pack(anchor="w")
+        ttk.Label(title_text_frame, text="Neuro-Adaptive Music Controller", style="Sub.TLabel", 
+                 font=("Segoe UI", 11)).pack(anchor="w", pady=(2, 0))
+        
+        # Status area with improved styling
         status_box = ttk.Frame(navbar, style="TFrame")
         status_box.pack(side="right", anchor="e")
+        
+        # Theme toggle button with better styling
+        theme_icon = "☀" if self.theme_mode == "dark" else "☾"
+        self.theme_btn = ttk.Button(status_box, text=theme_icon, command=self.toggle_theme, 
+                                     style="Theme.TButton", width=3)
+        self.theme_btn.pack(side="left", padx=(0, 15))
+        
+        # Status label with background card
+        status_card = ttk.Frame(status_box, style="Card.TFrame", padding=(12, 8))
+        status_card.pack(side="left", padx=(0, 15))
         self.status_var = tk.StringVar(value="Ready")
-        ttk.Label(status_box, textvariable=self.status_var, style="NavStatus.TLabel").pack(side="left", padx=(0, 15))
-        self.led_canvas = tk.Canvas(status_box, width=100, height=30, bg=self.P["bg"], highlightthickness=0)
+        ttk.Label(status_card, textvariable=self.status_var, style="NavStatus.TLabel").pack()
+        
+        # LED indicators with improved design
+        self.led_canvas = tk.Canvas(status_box, width=120, height=40, bg=self.P["bg"], highlightthickness=0, bd=0)
         self.led_canvas.pack(side="left")
-        self.led_sys = self._draw_led(80, 15, "System", self.P["success"])
-        self.led_run = self._draw_led(20, 15, "Active", self.P["input_bg"])
+        self.led_sys = self._draw_led(90, 20, "System", self.P["success"])
+        self.led_run = self._draw_led(20, 20, "Active", self.P["border"])
         
         main_body = ttk.Frame(root, style="TFrame")
-        main_body.pack(fill="both", expand=True, padx=25, pady=10)
-        main_body.columnconfigure(0, weight=0, minsize=340)
+        main_body.pack(fill="both", expand=True, padx=30, pady=(0, 20))
+        main_body.columnconfigure(0, weight=0, minsize=360)
         main_body.columnconfigure(1, weight=1)
         main_body.rowconfigure(0, weight=1)
 
-        # SIdebar Container (Holds Canvas + Scrollbar)
+        # Sidebar Container with enhanced card styling
         sidebar_container = ttk.Frame(main_body, style="Card.TFrame")
-        sidebar_container.grid(row=0, column=0, sticky="nsew", padx=(0, 20))
+        sidebar_container.grid(row=0, column=0, sticky="nsew", padx=(0, 25))
         
-        # Create Canvas & Scrollbar
-        self.canvas_sidebar = tk.Canvas(sidebar_container, bg=self.P["card_bg"], highlightthickness=0)
-        scrollbar = ttk.Scrollbar(sidebar_container, orient="vertical", command=self.canvas_sidebar.yview)
+        # Create Canvas WITHOUT scrollbar (autohide when not needed)
+        self.canvas_sidebar = tk.Canvas(sidebar_container, bg=self.P["card_bg"], highlightthickness=0, 
+                                       bd=0, relief="flat")
+        # Scrollbar styled to blend in (only visible on hover via OS)
+        scrollbar = ttk.Scrollbar(sidebar_container, orient="vertical", command=self.canvas_sidebar.yview, 
+                                 style="Vertical.TScrollbar")
         
-        # The actual Frame inside the canvas
-        sidebar = ttk.Frame(self.canvas_sidebar, style="Card.TFrame", padding=20)
+        # The actual Frame inside the canvas with better padding
+        sidebar = ttk.Frame(self.canvas_sidebar, style="Card.TFrame", padding=25)
         
         # Logic to make the frame inside the canvas scrollable
         sidebar.bind(
@@ -175,190 +361,287 @@ class GuiApp:
             self.canvas_sidebar.itemconfig("inner_frame", width=event.width)
         self.canvas_sidebar.bind("<Configure>", _configure_canvas)
         
-        def section(title): ttk.Label(sidebar, text=title.upper(), style="CardHeader.TLabel").pack(anchor="w", pady=(15, 8))
-        
-        # ANALYSIS SECTION
-        section("Analysis")
-        # Row 1: Subject Folder
-        self.analysis_row1 = ttk.Frame(sidebar, style="Card.TFrame")
-        self.analysis_row1.pack(fill="x", pady=(0, 2))
-        
-        self.subject_var = tk.StringVar()
-        self.subject_combo = ttk.Combobox(self.analysis_row1, textvariable=self.subject_var, state="readonly", height=15)
-        self.subject_combo.pack(side="left", fill="x", expand=True, padx=(0, 5))
-        self.subject_combo.bind("<<ComboboxSelected>>", self.on_subject_selected)
-        
-        ttk.Button(self.analysis_row1, text="🔄", style="Compact.TButton", width=3, command=self.refresh_analysis_subjects).pack(side="right")
+        def section(title): 
+            if sidebar.winfo_children():  # Add separator before sections (except first)
+                ttk.Separator(sidebar, orient="horizontal").pack(fill="x", pady=(20, 0))
+            ttk.Label(sidebar, text=title.upper(), style="CardHeader.TLabel").pack(anchor="w", pady=(20, 10))
 
-        # Row 2: Session List + View Button
-        self.analysis_row2 = ttk.Frame(sidebar, style="Card.TFrame")
-        self.analysis_row2.pack(fill="x", pady=(0, 5))
-        
-        self.session_var = tk.StringVar()
-        self.session_combo = ttk.Combobox(self.analysis_row2, textvariable=self.session_var, state="readonly", height=15)
-        self.session_combo.pack(side="left", fill="x", expand=True, padx=(0, 5))
-        
-        ttk.Button(self.analysis_row2, text="📊", style="Compact.TButton", width=3, command=self.view_session_plot).pack(side="right")
-
-        # MIDI Track Selection
-        ttk.Label(sidebar, text="MIDI TRACK", style="CardHeader.TLabel").pack(anchor="w")
-        self.midi_var = tk.StringVar(value=str(default_midi.name)) # Just name for dropdown
+        # MIDI Track Selection with improved spacing
+        section("MIDI Track")
         midi_row = ttk.Frame(sidebar, style="Card.TFrame")
-        midi_row.pack(fill="x", pady=(5, 15))
+        midi_row.pack(fill="x", pady=(0, 5))
         
-        self.midi_combo = ttk.Combobox(midi_row, textvariable=self.midi_var)
-        self.midi_combo.pack(side="left", fill="x", expand=True, padx=(0, 5))
+        self.midi_var = tk.StringVar(value=str(default_midi.name))
+        self.midi_combo = ttk.Combobox(midi_row, textvariable=self.midi_var, font=("Segoe UI", 10))
+        self.midi_combo.pack(side="left", fill="x", expand=True, padx=(0, 8))
         
-        # Folder button to open directory or pick file? 
-        # User wants dropdown, maybe keep "Open" button to pick custom?
-        # Let's keep one folder button to Pick Custom File.
-        ttk.Button(midi_row, text="📂", style="Compact.TButton", width=3, command=self.choose_midi).pack(side="right")
+        ttk.Button(midi_row, text="📂", style="Compact.TButton", width=4, command=self.choose_midi).pack(side="right")
         
         # SESSION NAME SELECTOR
-        ttk.Label(sidebar, text="SESSION NAME (LOG FILE)", style="CardHeader.TLabel").pack(anchor="w", pady=(10, 0))
+        section("Session Name")
         self.session_row = ttk.Frame(sidebar, style="Card.TFrame")
-        self.session_row.pack(fill="x", pady=(5, 10))
+        self.session_row.pack(fill="x", pady=(0, 5))
         
         self.session_name_var = tk.StringVar()
-        # Initial widget (will be updated by refresh)
-        self.session_input_widget = ttk.Combobox(self.session_row, textvariable=self.session_name_var)
-        self.session_input_widget.pack(side="left", fill="x", expand=True, padx=(0, 5))
+        self.session_input_widget = ttk.Combobox(self.session_row, textvariable=self.session_name_var, 
+                                                 font=("Segoe UI", 10))
+        self.session_input_widget.pack(side="left", fill="x", expand=True, padx=(0, 8))
         
-        ttk.Button(self.session_row, text="🔄", style="Compact.TButton", width=4, command=self.refresh_session_list).pack(side="right") # Refresh list
-        ttk.Label(sidebar, text="SERIAL PORT", style="CardHeader.TLabel").pack(anchor="w", pady=(10, 0))
+        ttk.Button(self.session_row, text="🔄", style="Compact.TButton", width=4, 
+                  command=self.refresh_session_list).pack(side="right")
+        
+        # SERIAL PORT
+        section("Serial Port")
         port_row = ttk.Frame(sidebar, style="Card.TFrame")
-        port_row.pack(fill="x", pady=(5, 0))
+        port_row.pack(fill="x", pady=(0, 5))
         
-        self.port_var = tk.StringVar(value="COM3") # Default
+        self.port_var = tk.StringVar(value="COM3")
         
         if SERIAL_AVAILABLE:
-            self.port_combo = ttk.Combobox(port_row, textvariable=self.port_var)
-            self.port_combo.pack(side="left", fill="x", expand=True, padx=(0, 5))
-            # No manual refresh needed anymore, but keeping button just in case
-            ttk.Button(port_row, text="🔄", style="Compact.TButton", width=4, command=self.refresh_ports).pack(side="right")
+            self.port_combo = ttk.Combobox(port_row, textvariable=self.port_var, font=("Segoe UI", 10))
+            self.port_combo.pack(side="left", fill="x", expand=True, padx=(0, 8))
+            ttk.Button(port_row, text="🔄", style="Compact.TButton", width=4, 
+                      command=self.refresh_ports).pack(side="right")
         else:
-            # Fallback to text entry if pyserial not installed
-            ttk.Entry(port_row, textvariable=self.port_var).pack(fill="x", expand=True)
+            ttk.Entry(port_row, textvariable=self.port_var, font=("Segoe UI", 10)).pack(fill="x", expand=True)
 
+        # Sync Mode with improved radio button styling
         section("Sync Mode")
+        mode_container = ttk.Frame(sidebar, style="Card.TFrame")
+        mode_container.pack(fill="x", pady=(0, 5))
+        
         self.mode_var = tk.StringVar(value="dynamic")
-        ttk.Radiobutton(sidebar, text="🧠 Dynamic", value="dynamic", variable=self.mode_var, command=self.on_mode_change).pack(anchor="w", pady=5)
-        ttk.Radiobutton(sidebar, text="🛠 Manual Override", value="manual", variable=self.mode_var, command=self.on_mode_change).pack(anchor="w", pady=5)
-        # MANUAL BPM
-        self.manual_bpm_frame = ttk.Frame(sidebar, style="Card.TFrame")
-        self.manual_bpm_frame.pack(fill="x", pady=10)
+        ttk.Radiobutton(mode_container, text="🧠  Dynamic Sync", value="dynamic", 
+                       variable=self.mode_var, command=self.on_mode_change).pack(anchor="w", pady=6)
+        ttk.Radiobutton(mode_container, text="🚀  Hybrid Mode", value="hybrid", 
+                       variable=self.mode_var, command=self.on_mode_change).pack(anchor="w", pady=6)
+        ttk.Radiobutton(mode_container, text="🛠  Manual Override", value="manual", 
+                       variable=self.mode_var, command=self.on_mode_change).pack(anchor="w", pady=6)
         
-        ttk.Label(self.manual_bpm_frame, text="Target BPM", style="CardHeader.TLabel").pack(anchor="w")
+        # MANUAL BPM with improved design
+        section("Target BPM")
+        self.manual_bpm_frame = ttk.Frame(sidebar, style="TFrame")
+        self.manual_bpm_frame.pack(fill="x", pady=(0, 5))
         
-        # BPM Slider
+        # BPM value display with better styling
         self.manual_bpm_var = tk.DoubleVar(value=100.0)
         
-        bpm_row = ttk.Frame(self.manual_bpm_frame, style="Card.TFrame")
-        bpm_row.pack(fill="x", pady=5)
+        self.bpm_val_label = ttk.Label(self.manual_bpm_frame, text="100 BPM", 
+                                       font=("Segoe UI", 16, "bold"), foreground=self.P["text_main"],
+                                       background=self.P["bg"])
+        self.bpm_val_label.pack(pady=(0, 8))
         
-        self.bpm_val_label = ttk.Label(bpm_row, text="100 BPM", style="Sub.TLabel", width=10)
-        self.bpm_val_label.pack(side="right", padx=5)
+        # BPM Slider with custom styling
+        bpm_slider_frame = ttk.Frame(self.manual_bpm_frame, style="TFrame")
+        bpm_slider_frame.pack(fill="x", pady=(0, 5))
+        
+        self.bpm_slider = ttk.Scale(bpm_slider_frame, from_=0, to=400, orient="horizontal", 
+                                   variable=self.manual_bpm_var, command=self.on_bpm_slider_change,
+                                   length=280)
+        self.bpm_slider.pack(fill="x", padx=5)
 
-        self.bpm_slider = ttk.Scale(bpm_row, from_=0, to=400, orient="horizontal", 
-                                   variable=self.manual_bpm_var, command=self.on_bpm_slider_change)
-        self.bpm_slider.pack(side="left", fill="x", expand=True, padx=5)
-
+        # Initialize variables for Analysis tab
+        self.subject_var = tk.StringVar()
+        self.session_var = tk.StringVar()
+        
+        # --- ADVANCED SETTINGS (COLLAPSIBLE) ---
+        self.advanced_pane = CollapsiblePane(sidebar, title="Advanced Settings", expanded=False)
+        self.advanced_pane.pack(fill="x", pady=(15, 0), anchor="w")
+        
+        # Re-parent controls to [self.advanced_pane.content_frame] instead of [sidebar]
+        adv_parent = self.advanced_pane.content_frame
+        
         # SMOOTHING CONTROL (Climbing & Cascading)
-        ttk.Label(sidebar, text="CLIMBING (SPEEDING UP)", style="CardHeader.TLabel").pack(anchor="w", pady=(15, 0))
+        ttk.Label(adv_parent, text="Climbing (Speed Up)", style="CardLabel.TLabel", 
+                 font=("Segoe UI", 9, "bold")).pack(anchor="w", pady=(5, 2))
         
-        attack_row = ttk.Frame(sidebar, style="Card.TFrame")
-        attack_row.pack(fill="x", pady=5)
+        attack_row = ttk.Frame(adv_parent, style="Card.TFrame")
+        attack_row.pack(fill="x", pady=(0, 10))
         
         self.smoothing_up_var = tk.StringVar() 
-        entry_up = ttk.Entry(attack_row, textvariable=self.smoothing_up_var, width=15, font=("Segoe UI", 12))
+        entry_up = ttk.Entry(attack_row, textvariable=self.smoothing_up_var, width=15, font=("Segoe UI", 10))
         entry_up.pack(side="left", padx=(0, 5))
-        self._bind_placeholder(entry_up, self.smoothing_up_var, "Default (engine)")
+        self._bind_placeholder(entry_up, self.smoothing_up_var, "Default")
         
         ttk.Button(attack_row, text="?", style="Help.TButton", width=2, command=self.show_attack_help).pack(side="left", padx=5)
 
         # Cascading
-        ttk.Label(sidebar, text="CASCADING (SLOWING DOWN)", style="CardHeader.TLabel").pack(anchor="w", pady=(15, 0))
+        ttk.Label(adv_parent, text="Cascading (Slow Down)", style="CardLabel.TLabel", 
+                 font=("Segoe UI", 9, "bold")).pack(anchor="w", pady=(5, 2))
         
-        decay_row = ttk.Frame(sidebar, style="Card.TFrame")
-        decay_row.pack(fill="x", pady=5)
+        decay_row = ttk.Frame(adv_parent, style="Card.TFrame")
+        decay_row.pack(fill="x", pady=(0, 10))
         
         self.smoothing_down_var = tk.StringVar()
-        entry_down = ttk.Entry(decay_row, textvariable=self.smoothing_down_var, width=15, font=("Segoe UI", 12))
+        entry_down = ttk.Entry(decay_row, textvariable=self.smoothing_down_var, width=15, font=("Segoe UI", 10))
         entry_down.pack(side="left", padx=(0, 5))
-        self._bind_placeholder(entry_down, self.smoothing_down_var, "Default (engine)")
+        self._bind_placeholder(entry_down, self.smoothing_down_var, "Default")
 
         ttk.Button(decay_row, text="?", style="Help.TButton", width=2, command=self.show_decay_help).pack(side="left", padx=5)
 
-        # STEP AVERAGING WINDOW (ESP32 Config)
-        ttk.Label(sidebar, text="Smoothing Window (Stability)", style="CardHeader.TLabel").pack(anchor="w", pady=(10, 0))
-        window_row = ttk.Frame(sidebar, style="Card.TFrame")
-        window_row.pack(fill="x", pady=5)
+        # STEP AVERAGING WINDOW
+        ttk.Label(adv_parent, text="Smoothing Window", style="CardLabel.TLabel", 
+                 font=("Segoe UI", 9, "bold")).pack(anchor="w", pady=(5, 2))
+        window_row = ttk.Frame(adv_parent, style="Card.TFrame")
+        window_row.pack(fill="x", pady=(0, 10))
         
         self.step_window_var = tk.StringVar()
-        entry_win = ttk.Entry(window_row, textvariable=self.step_window_var, width=15, font=("Segoe UI", 12))
+        entry_win = ttk.Entry(window_row, textvariable=self.step_window_var, width=12, font=("Segoe UI", 10))
         entry_win.pack(side="left", padx=(0, 5))
-        self._bind_placeholder(entry_win, self.step_window_var, "Default (engine)")
-        ttk.Label(window_row, text="Steps", style="Sub.TLabel").pack(side="left", padx=(0, 5))
-        ttk.Button(window_row, text="?", style="Help.TButton", width=2, command=self.show_window_help).pack(side="left", padx=5)
+        self._bind_placeholder(entry_win, self.step_window_var, "Default")
+        ttk.Label(window_row, text="Steps", style="CardLabel.TLabel", font=("Segoe UI", 9)).pack(side="left", padx=(0, 5))
+        ttk.Button(window_row, text="?", style="Help.TButton", width=2, command=self.show_window_help).pack(side="left")
 
         # STRIDE CONFIG 
-        ttk.Label(sidebar, text="Stride (Update Frequency)", style="CardHeader.TLabel").pack(anchor="w", pady=(10, 0))
-        stride_row = ttk.Frame(sidebar, style="Card.TFrame")
-        stride_row.pack(fill="x", pady=5)
+        ttk.Label(adv_parent, text="Update Stride", style="CardLabel.TLabel", 
+                 font=("Segoe UI", 9, "bold")).pack(anchor="w", pady=(5, 2))
+        stride_row = ttk.Frame(adv_parent, style="Card.TFrame")
+        stride_row.pack(fill="x", pady=(0, 10))
         self.stride_var = tk.StringVar()
-        entry_stride = ttk.Entry(stride_row, textvariable=self.stride_var, width=15, font=("Segoe UI", 12))
+        entry_stride = ttk.Entry(stride_row, textvariable=self.stride_var, width=12, font=("Segoe UI", 10))
         entry_stride.pack(side="left", padx=(0, 5))
-        self._bind_placeholder(entry_stride, self.stride_var, "Set Stride")
-        ttk.Label(stride_row, text="Steps", style="Sub.TLabel").pack(side="left", padx=(0, 5))
-        ttk.Button(stride_row, text="?", style="Help.TButton", width=2, command=self.show_stride_help).pack(side="left", padx=5)
+        self._bind_placeholder(entry_stride, self.stride_var, "Default")
+        ttk.Label(stride_row, text="Steps", style="CardLabel.TLabel", font=("Segoe UI", 9)).pack(side="left", padx=(0, 5))
+        ttk.Button(stride_row, text="?", style="Help.TButton", width=2, command=self.show_stride_help).pack(side="left")
+
+        # PREDICTION MODEL SELECTOR
+        ttk.Label(adv_parent, text="Prediction Model", style="CardLabel.TLabel", 
+                 font=("Segoe UI", 9, "bold")).pack(anchor="w", pady=(5, 2))
+        model_row = ttk.Frame(adv_parent, style="Card.TFrame")
+        model_row.pack(fill="x", pady=(0, 10))
+        self.model_var = tk.StringVar(value="Base Model")
+        self.model_combo = ttk.Combobox(model_row, textvariable=self.model_var, state="readonly", width=22, 
+                                       font=("Segoe UI", 9))
+        self.model_combo.pack(side="left", padx=(0, 5))
+        ttk.Button(model_row, text="↻", style="Compact.TButton", width=3, command=self._refresh_model_list).pack(side="left")
+        self._refresh_model_list()  # Populate on init
+        
+        # Weight Calibration
+        ttk.Label(adv_parent, text="Calibration Margin", style="CardLabel.TLabel", 
+                 font=("Segoe UI", 9, "bold")).pack(anchor="w", pady=(5, 2))
+        cali_frame = ttk.Frame(adv_parent, style="Card.TFrame")
+        cali_frame.pack(fill="x", pady=(0, 5))
+        self.cal_margin_var = tk.StringVar(value="200")
+        ttk.Entry(cali_frame, textvariable=self.cal_margin_var, width=12, font=("Segoe UI", 10)).pack(side="left", padx=(0, 5))
+        ttk.Label(cali_frame, text="Units", style="CardLabel.TLabel", font=("Segoe UI", 9)).pack(side="left")
         
         # --- BOTTOM CONTROLS ---
         ttk.Frame(sidebar, style="Card.TFrame").pack(fill="both", expand=True) # Spacer pushes everything down
 
         section("Session Control")
-        self.btn_start = ttk.Button(sidebar, text="▶ START SESSION", command=self.start_session, style="Primary.TButton")
-        self.btn_start.pack(fill="x", pady=(0, 10))
         
-        self.btn_stop = ttk.Button(sidebar, text="⏹ STOP SESSION", command=self.stop_session, style="Danger.TButton", state="disabled")
-        self.btn_stop.pack(fill="x", pady=(0, 10))
+        # Primary action buttons with enhanced styling
+        self.btn_start = ttk.Button(sidebar, text="▶  START SESSION", command=self.start_session, 
+                                     style="Primary.TButton")
+        self.btn_start.pack(fill="x", pady=(0, 12))
+        
+        self.btn_stop = ttk.Button(sidebar, text="⏹  STOP SESSION", command=self.stop_session, 
+                                    style="Danger.TButton", state="disabled")
+        self.btn_stop.pack(fill="x", pady=(0, 12))
+        
+        self.btn_calibrate = ttk.Button(sidebar, text="✅  CALIBRATE WEIGHT", command=self.on_calibrate_weight, 
+                                         style="Success.TButton")
+        self.btn_calibrate.pack(fill="x", pady=(0, 12))
 
-        self.btn_quit = ttk.Button(sidebar, text="❌ QUIT APP", command=self.quit_app, style="Secondary.TButton")
+        self.btn_quit = ttk.Button(sidebar, text="❌  QUIT APPLICATION", command=self.quit_app, 
+                                    style="Secondary.TButton")
         self.btn_quit.pack(fill="x")
 
-        # Visualization
-        viz_root = ttk.Frame(main_body, style="TFrame")
-        viz_root.grid(row=0, column=1, sticky="nsew")
-        # Visualization Controls
-        viz_controls = ttk.Frame(viz_root, style="TFrame")
-        viz_controls.pack(fill="x", pady=(0, 5))
+        # ====================== TABBED MAIN AREA ======================
+        # Notebook for switching between Session (live plot) and Training tabs
+        self.main_notebook = ttk.Notebook(main_body)
+        self.main_notebook.grid(row=0, column=1, sticky="nsew")
+
+        # Configure Notebook style with enhanced tabs - completely borderless
+        style.configure("TNotebook", 
+                       background=self.P["bg"], 
+                       borderwidth=0, 
+                       relief="flat", 
+                       highlightthickness=0,
+                       bordercolor=self.P["bg"],
+                       lightcolor=self.P["bg"],
+                       darkcolor=self.P["bg"],
+                       tabmargins=[0, 0, 0, 0])
+        # Remove ALL border elements from the notebook
+        style.layout("TNotebook", [
+            ("Notebook.client", {"sticky": "nswe", "border": 0})
+        ])
+        style.layout("TNotebook.Tab", [
+            ("Notebook.tab", {
+                "sticky": "nswe",
+                "children": [
+                    ("Notebook.padding", {
+                        "side": "top",
+                        "sticky": "nswe",
+                        "children": [
+                            ("Notebook.label", {"side": "top", "sticky": ""})
+                        ]
+                    })
+                ]
+            })
+        ])
+        style.configure("TNotebook.Tab", font=("Segoe UI", 11, "bold"), padding=(20, 12),
+                        background=self.P["border"], foreground=self.P["text_sub"],
+                        borderwidth=0, relief="flat",
+                        focuscolor="",
+                        lightcolor=self.P["bg"],
+                        darkcolor=self.P["bg"],
+                        bordercolor=self.P["bg"])
+        style.map("TNotebook.Tab",
+                  background=[("selected", self.P["accent"])],
+                  foreground=[("selected", "white")],
+                  lightcolor=[("selected", self.P["bg"]), ("!selected", self.P["bg"])],
+                  darkcolor=[("selected", self.P["bg"]), ("!selected", self.P["bg"])],
+                  bordercolor=[("selected", self.P["bg"]), ("!selected", self.P["bg"])],
+                  expand=[("selected", (1, 1, 1, 0))])
+
+        # -------------------- TAB 1: SESSION (Live Plot) --------------------
+        tab_session = ttk.Frame(self.main_notebook, style="TFrame")
+        self.main_notebook.add(tab_session, text="  ▶  Live Session  ")
+
+        # Visualization controls with better styling
+        viz_controls = ttk.Frame(tab_session, style="TFrame")
+        viz_controls.pack(fill="x", pady=(10, 10))
+        
+        ttk.Label(viz_controls, text="Display Options:", style="Sub.TLabel", 
+                 font=("Segoe UI", 10, "bold")).pack(side="left", padx=(10, 20))
         
         self.show_2x_var = tk.BooleanVar(value=False)
         self.show_half_var = tk.BooleanVar(value=False)
         
-        # Checkboxes
-        ttk.Checkbutton(viz_controls, text="Show 2x BPM", variable=self.show_2x_var, 
-                        command=self.update_plot_options).pack(side="right", padx=10)
-        ttk.Checkbutton(viz_controls, text="Show 0.5x BPM", variable=self.show_half_var, 
-                        command=self.update_plot_options).pack(side="right", padx=10)
+        ttk.Checkbutton(viz_controls, text="Show 2x BPM Reference", variable=self.show_2x_var, 
+                        command=self.update_plot_options).pack(side="right", padx=15)
+        ttk.Checkbutton(viz_controls, text="Show 0.5x BPM Reference", variable=self.show_half_var, 
+                        command=self.update_plot_options).pack(side="right", padx=15)
         
-        plot_card = ttk.Frame(viz_root, style="Card.TFrame", padding=10)
-        plot_card.pack(fill="both", expand=True)
+        # Plot card with enhanced styling
+        plot_card = ttk.Frame(tab_session, style="Card.TFrame", padding=15)
+        plot_card.pack(fill="both", expand=True, padx=10, pady=(0, 10))
         
         self.figure = Figure(figsize=(5, 4), dpi=100)
-        self.figure.patch.set_facecolor(self.P["card_bg"])
-        # CHANGED: Single subplot (No bottom graph)
+        self.figure.patch.set_facecolor(self.P.get("plot_bg", self.P["card_bg"]))
         self.ax1 = self.figure.add_subplot(111)
-        self.ax2 = None # Explicitly None so Plotter knows
+        self.ax2 = None
         self.figure.subplots_adjust(left=0.08, bottom=0.1, right=0.95, top=0.92)
         
-        # Initialize Plotter Logic
         self.plotter = LivePlotter(self.ax1, self.P)
         self.plotter.view_window_sec = self.view_window_sec
-        # Initial style application (empty)
         self.plotter.update(pd.DataFrame({"seconds": [], "walking_bpm": [], "song_bpm": [], "step_event": []}))
 
         self.canvas = FigureCanvasTkAgg(self.figure, master=plot_card)
-        self.canvas.get_tk_widget().pack(fill="both", expand=True)
+        canvas_widget = self.canvas.get_tk_widget()
+        canvas_widget.configure(borderwidth=0, highlightthickness=0, relief="flat")
+        canvas_widget.pack(fill="both", expand=True)
+
+        # -------------------- TAB 2: MODEL TRAINING --------------------
+        tab_training = ttk.Frame(self.main_notebook, style="TFrame")
+        self.main_notebook.add(tab_training, text="  🧠  Model Training  ")
+        self._build_training_tab(tab_training)
+
+        # -------------------- TAB 3: ANALYSIS --------------------
+        tab_analysis = ttk.Frame(self.main_notebook, style="TFrame")
+        self.main_notebook.add(tab_analysis, text="  📊  Analysis  ")
+        self._build_analysis_tab(tab_analysis)
 
         self.on_mode_change() # Init state
         self.poll_status()
@@ -372,14 +655,20 @@ class GuiApp:
             
         self.refresh_session_list() # Init session list
         self.refresh_midi_list()    # Init MIDI list
-        self.refresh_analysis_subjects() # Init Analysis list
 
     def _draw_led(self, x, y, l, c):
-        r=6; o=self.led_canvas.create_oval(x-r, y-r, x+r, y+r, fill=c, outline="")
-        self.led_canvas.create_text(x+15, y, text=l, anchor="w", fill=self.P["text_sub"], font=("Segoe UI", 9))
+        """Draw an LED indicator with enhanced styling"""
+        r=7
+        # Add subtle glow effect
+        self.led_canvas.create_oval(x-r-2, y-r-2, x+r+2, y+r+2, fill=self.P["shadow"], outline="")
+        o=self.led_canvas.create_oval(x-r, y-r, x+r, y+r, fill=c, outline=self.P["highlight"], width=1)
+        self.led_canvas.create_text(x+18, y, text=l, anchor="w", fill=self.P["text_sub"], 
+                                    font=("Segoe UI", 9, "bold"))
         return o
 
-    def _set_led(self, i, a, c=None): self.led_canvas.itemconfig(i, fill=(c if c else self.P["success"]) if a else self.P["input_bg"])
+    def _set_led(self, i, a, c=None): 
+        """Update LED state with color"""
+        self.led_canvas.itemconfig(i, fill=(c if c else self.P["success"]) if a else self.P["border"])
 
     def log(self, msg): self.status_var.set(msg)
     def choose_midi(self): 
@@ -406,6 +695,38 @@ class GuiApp:
     def refresh_midi_list(self):
         self.midi_combo['values'] = self.get_midi_files()
         if self.midi_combo['values']: self.midi_combo.current(0)
+
+    def _refresh_model_list(self):
+        """Scan for available prediction models (base + user heads)."""
+        models_dir = Path(__file__).resolve().parent.parent / "research" / "LightGBM" / "results" / "models"
+        model_options = []
+        self._model_paths = {}  # Map display name -> actual path
+        
+        # Base model
+        base_model = models_dir / "lgbm_model.joblib"
+        if base_model.exists():
+            model_options.append("Base Model")
+            self._model_paths["Base Model"] = str(base_model)
+        
+        # User head models
+        for head in sorted(models_dir.glob("lgbm_user_head_*.joblib")):
+            suffix = head.stem.replace("lgbm_user_head_", "")
+            display_name = f"User Head: {suffix}"
+            model_options.append(display_name)
+            self._model_paths[display_name] = str(head)
+        
+        if not model_options:
+            model_options = ["No models found"]
+            self._model_paths["No models found"] = None
+        
+        self.model_combo['values'] = model_options
+        if model_options and self.model_var.get() not in model_options:
+            self.model_combo.current(0)
+
+    def get_selected_model_path(self):
+        """Return the file path of the selected prediction model, or None."""
+        selected = self.model_var.get()
+        return self._model_paths.get(selected)
     
     def on_bpm_slider_change(self, val):
         """Handle slider movement with real-time update."""
@@ -458,6 +779,9 @@ class GuiApp:
     def start_session(self):
         """Action for the 'START SESSION' button."""
         if self.is_running: return
+        if self.is_training:
+            self.log("Cannot start session while training is in progress.")
+            return
 
         # Clear any leftover live data/plot from previous session
         self.live_data_buffer = []
@@ -520,6 +844,9 @@ class GuiApp:
             if val: ad = float(val)
         except: pass
 
+        # Get selected prediction model path
+        model_path = self.get_selected_model_path()
+        
         # Create and start the Subprocess Manager
         self.session_thread = SubprocessManager(
             str(p),
@@ -534,24 +861,14 @@ class GuiApp:
             session_name=s_name,
             alpha_up=au,
             alpha_down=ad,
+            hybrid_mode=(self.mode_var.get() == "hybrid"),
+            model_path=model_path,
         )
         
         # Update UI state
         self.is_running = True
         self.btn_start.configure(state="disabled"); self.btn_stop.configure(state="normal")
         self._set_led(self.led_run, True, self.P["warning"]); self.log(f"Session running on {port}")
-
-    def _draw_led(self, x, y, l, c):
-        r=6; o=self.led_canvas.create_oval(x-r, y-r, x+r, y+r, fill=c, outline="")
-        self.led_canvas.create_text(x+15, y, text=l, anchor="w", fill=self.P["text_sub"], font=("Segoe UI", 9))
-        return o
-
-    def _set_led(self, i, a, c=None): self.led_canvas.itemconfig(i, fill=(c if c else self.P["success"]) if a else self.P["input_bg"])
-
-    def log(self, msg): self.status_var.set(msg)
-    def choose_midi(self): 
-        p = filedialog.askopenfilename(filetypes=[("MIDI", ".mid"), ("All", ".*")])
-        if p: self.midi_var.set(p)
 
     def refresh_ports(self):
         """Populate the combobox with detected serial ports."""
@@ -605,29 +922,18 @@ class GuiApp:
     def refresh_session_list(self):
         vals = self.get_existing_sessions()
         
-        # Determine strict type needed
-        # If no files -> Entry (cleaner). If files -> Combobox (dropdown).
-        target_type = ttk.Combobox if vals else ttk.Entry
+        # Always use a Combobox (Writable) so user can Type NEW or Select EXISTING
+        # We assume self.session_input_widget is already a Combobox (created in __init__)
         
-        # Check current type
-        current_type = type(self.session_input_widget)
-        
-        if current_type != target_type:
-            # Swap Widget
+        # Ensure it has not been swapped to an Entry by legacy code
+        if not isinstance(self.session_input_widget, ttk.Combobox):
+            # If for some reason it's an Entry, swap it back to Combobox permanently
             self.session_input_widget.destroy()
-            if target_type == ttk.Combobox:
-                self.session_input_widget = ttk.Combobox(self.session_row, textvariable=self.session_name_var)
-                self.session_input_widget['values'] = vals
-            else:
-                self.session_input_widget = ttk.Entry(self.session_row, textvariable=self.session_name_var)
-            
-            # Repack (pack side=left puts it before the right-aligned button)
+            self.session_input_widget = ttk.Combobox(self.session_row, textvariable=self.session_name_var)
             self.session_input_widget.pack(side="left", fill="x", expand=True, padx=(0, 5))
             
-        elif vals and isinstance(self.session_input_widget, ttk.Combobox):
-             self.session_input_widget['values'] = vals
+        self.session_input_widget['values'] = vals
 
-        # Don't auto-select to preserve user input intent if they are typing
 
 
     def refresh_analysis_subjects(self):
@@ -743,9 +1049,11 @@ class GuiApp:
             print("DEBUG: PIL not found, falling back to scrollbars")
             container = ttk.Frame(top)
             container.pack(fill="both", expand=True)
-            canvas = tk.Canvas(container, bg=self.P["bg"], highlightthickness=0)
-            hbar = ttk.Scrollbar(container, orient="horizontal", command=canvas.xview)
-            vbar = ttk.Scrollbar(container, orient="vertical", command=canvas.yview)
+            canvas = tk.Canvas(container, bg=self.P["bg"], highlightthickness=0, bd=0)
+            hbar = ttk.Scrollbar(container, orient="horizontal", command=canvas.xview,
+                               style="Horizontal.TScrollbar")
+            vbar = ttk.Scrollbar(container, orient="vertical", command=canvas.yview,
+                               style="Vertical.TScrollbar")
             scrollable_frame = ttk.Frame(canvas, style="TFrame")
             scrollable_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
             canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
@@ -777,6 +1085,14 @@ class GuiApp:
             if self.live_data_buffer:
                 import pandas as pd
                 df = pd.DataFrame(self.live_data_buffer)
+                
+                # Preprocess DF (match logic in refresh_plot)
+                df.rename(columns={"t": "time", "s": "song_bpm", "w": "walking_bpm", "e": "step_event"}, inplace=True)
+                if "time" in df.columns:
+                     df["seconds"] = df["time"].apply(_elapsed_to_seconds)
+                else:
+                     df["seconds"] = df.index
+                     
                 self.plotter.finalize_plot(df)
                 self.canvas.draw()
         except Exception as e:
@@ -847,6 +1163,993 @@ class GuiApp:
             self.log(f"{type_key.title()} set to {v}")
         except:
             self.log(f"Invalid {type_key} value")
+
+    def on_calibrate_weight(self):
+        """Run calibration without requiring a session; blocks start until done."""
+        if self.is_calibrating:
+            self.log("Calibration already in progress.")
+            return
+        if send_calibration_command is None:
+            self.log("Calibration helper unavailable.")
+            return
+
+        # Derive port (strip description if needed)
+        port_val = self.port_var.get().strip()
+        if not port_val:
+            self.log("Select a serial port first.")
+            return
+        # If combobox value is like "COM3 - desc", take first token
+        port = port_val.split()[0]
+
+        try:
+            margin = int(self.cal_margin_var.get())
+        except ValueError:
+            margin = 200
+            self.log("Invalid margin; using 200.")
+
+        # UI lockout during calibration
+        self.is_calibrating = True
+        self._cal_spinner_idx = 0
+        self.btn_calibrate.configure(state="disabled")
+        self.btn_start.configure(state="disabled")
+        self.btn_stop.configure(state="disabled")
+        self._animate_calibration_spinner()
+
+        def _worker():
+            ok = False
+            try:
+                import serial
+                with serial.Serial(port, 115200, timeout=1.0) as ser:
+                    class _Logger:
+                        def log(self, msg): self_outer.log(msg)
+                    ok = send_calibration_command(ser, _Logger(), margin=margin, retries=3)
+            except Exception as e:
+                self.log(f"Calibration failed: {e}")
+            finally:
+                self.root.after(0, lambda ok=ok: self._finish_calibration(ok))
+
+        self_outer = self
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _animate_calibration_spinner(self):
+        """Animate spinner in calibration button while calibrating."""
+        if not self.is_calibrating:
+            return
+        frames = ("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏")
+        self.btn_calibrate.configure(text=f"Calibrating {frames[self._cal_spinner_idx % len(frames)]}")
+        self._cal_spinner_idx += 1
+        self.root.after(100, self._animate_calibration_spinner)
+
+    def _finish_calibration(self, success: bool):
+        """Reset UI after calibration with brief result flash."""
+        self.is_calibrating = False
+        # Show result briefly
+        if success:
+            self.btn_calibrate.configure(text="✓ Done!", state="disabled")
+            self.log("Calibration completed.")
+        else:
+            self.btn_calibrate.configure(text="✗ Failed", state="disabled")
+        # Restore button after delay
+        self.root.after(1500, self._restore_calibration_button)
+
+    def _restore_calibration_button(self):
+        """Restore calibration button to normal state."""
+        self.btn_calibrate.configure(state="normal", text="✅ CALIBRATE WEIGHT")
+        # Re-enable start; stop remains as-is depending on running state
+        if not self.is_running:
+            self.btn_start.configure(state="normal")
+        else:
+            self.btn_start.configure(state="disabled")
+            self.btn_stop.configure(state="normal")
+
+    # ====================== TRAINING TAB ======================
+    def _build_training_tab(self, parent):
+        """Build the Model Training tab UI."""
+        self.is_training = False
+        self.training_process = None
+
+        # Use PanedWindow for resizable two-column layout
+        paned = ttk.PanedWindow(parent, orient="horizontal", style="TPanedwindow")
+        paned.pack(fill="both", expand=True, padx=5, pady=5)
+
+        # ---- LEFT: Session Selection ----
+        left_card = ttk.Frame(paned, style="Card.TFrame", padding=15)
+        paned.add(left_card, weight=1)
+
+        ttk.Label(left_card, text="Select Sessions for Training", style="CardHeader.TLabel").pack(anchor="w")
+        ttk.Label(left_card, text="Check users/sessions to include in training data",
+                  style="CardSub.TLabel").pack(anchor="w", pady=(0, 10))
+
+        # Treeview for session selection
+        tree_frame = ttk.Frame(left_card, style="TFrame")
+        tree_frame.pack(fill="both", expand=True, padx=0, pady=0)
+
+        tree_scroll = ttk.Scrollbar(tree_frame, orient="vertical", style="Vertical.TScrollbar")
+        self.session_tree = ttk.Treeview(tree_frame, columns=("sessions",), show="tree",
+                                          selectmode="extended", yscrollcommand=tree_scroll.set,
+                                          style="Treeview")
+        tree_scroll.configure(command=self.session_tree.yview)
+        tree_scroll.pack(side="right", fill="y")
+        self.session_tree.pack(side="left", fill="both", expand=True, padx=0, pady=0)
+
+        self.session_tree.column("#0", width=300, stretch=True)
+        self.session_tree.heading("#0", text="User / Session")
+
+        # Buttons under tree
+        tree_btn_frame = ttk.Frame(left_card, style="Card.TFrame")
+        tree_btn_frame.pack(fill="x", pady=(10, 0))
+        ttk.Button(tree_btn_frame, text="↻ Refresh", command=self._refresh_training_sessions,
+                   style="Compact.TButton").pack(side="left", padx=(0, 5))
+        ttk.Button(tree_btn_frame, text="Select All", command=self._select_all_sessions,
+                   style="Compact.TButton").pack(side="left")
+
+        # ---- RIGHT: Training Options & Controls ----
+        right_card = ttk.Frame(paned, style="Card.TFrame", padding=15)
+        paned.add(right_card, weight=1)
+
+        ttk.Label(right_card, text="Training Options", style="CardHeader.TLabel").pack(anchor="w")
+
+        # Algorithm selection
+        algo_frame = ttk.Frame(right_card, style="Card.TFrame")
+        algo_frame.pack(fill="x", pady=(10, 5))
+        ttk.Label(algo_frame, text="Algorithm:", style="CardLabel.TLabel").pack(side="left")
+        self.algo_var = tk.StringVar(value="LightGBM")
+        algo_combo = ttk.Combobox(algo_frame, textvariable=self.algo_var, state="readonly", width=15)
+        algo_combo['values'] = ["LightGBM"]  # Expandable later
+        algo_combo.pack(side="left", padx=(10, 0))
+
+        # Training type selection
+        type_frame = ttk.Frame(right_card, style="Card.TFrame")
+        type_frame.pack(fill="x", pady=5)
+        ttk.Label(type_frame, text="Training Type:", style="CardLabel.TLabel").pack(side="left")
+        self.train_type_var = tk.StringVar(value="base")
+        ttk.Radiobutton(type_frame, text="Base Model", variable=self.train_type_var, value="base").pack(side="left", padx=(10, 5))
+        ttk.Radiobutton(type_frame, text="User Head", variable=self.train_type_var, value="user_head").pack(side="left")
+
+        # User head options (shown when user_head selected)
+        self.user_head_frame = ttk.Frame(right_card, style="Card.TFrame")
+        self.user_head_frame.pack(fill="x", pady=5)
+        ttk.Label(self.user_head_frame, text="User Name:", style="CardLabel.TLabel").pack(side="left")
+        self.user_head_name_var = tk.StringVar(value="")
+        ttk.Entry(self.user_head_frame, textvariable=self.user_head_name_var, width=20).pack(side="left", padx=(10, 0))
+        ttk.Label(self.user_head_frame, text="(for saving head artifact)", style="CardSub.TLabel").pack(side="left", padx=(5, 0))
+
+        # Optuna optimization checkbox (only for base model)
+        optuna_frame = ttk.Frame(right_card, style="Card.TFrame")
+        optuna_frame.pack(fill="x", pady=5)
+        self.optuna_var = tk.BooleanVar(value=False)
+        self.optuna_check = ttk.Checkbutton(optuna_frame, text="Optuna Hyperparameter Optimization",
+                                             variable=self.optuna_var, command=self._on_optuna_change)
+        self.optuna_check.pack(side="left")
+        
+        # Optuna trials setting
+        self.optuna_trials_frame = ttk.Frame(right_card, style="Card.TFrame")
+        ttk.Label(self.optuna_trials_frame, text="Trials:", style="CardLabel.TLabel").pack(side="left")
+        self.optuna_trials_var = tk.StringVar(value="30")
+        ttk.Entry(self.optuna_trials_frame, textvariable=self.optuna_trials_var, width=6).pack(side="left", padx=(5, 0))
+        ttk.Label(self.optuna_trials_frame, text="(more = better but slower)", style="CardSub.TLabel").pack(side="left", padx=(5, 0))
+
+        # Bind radio button change (must be after optuna widgets are created)
+        self.train_type_var.trace_add("write", lambda *_: self._on_train_type_change())
+        self._on_train_type_change()  # Initial state
+
+        # Separator
+        ttk.Separator(right_card, orient="horizontal").pack(fill="x", pady=15)
+
+        # Progress section
+        ttk.Label(right_card, text="Training Progress", style="CardHeader.TLabel").pack(anchor="w")
+
+        self.train_progress = ttk.Progressbar(right_card, mode="indeterminate", length=300)
+        self.train_progress.pack(fill="x", pady=(10, 5))
+
+        self.train_status_var = tk.StringVar(value="Ready to train")
+        ttk.Label(right_card, textvariable=self.train_status_var, style="CardSub.TLabel").pack(anchor="w")
+
+        # Training log (small text area)
+        log_frame = ttk.Frame(right_card, style="Card.TFrame")
+        log_frame.pack(fill="both", expand=True, pady=(10, 0))
+        self.train_log = tk.Text(log_frame, height=8, wrap="word", font=("Consolas", 9),
+                                  bg=self.P["bg"], fg=self.P["text_main"], insertbackground=self.P["text_main"],
+                                  relief="flat", borderwidth=0, highlightthickness=0)
+        log_scroll = ttk.Scrollbar(log_frame, orient="vertical", command=self.train_log.yview, 
+                                   style="Vertical.TScrollbar")
+        self.train_log.configure(yscrollcommand=log_scroll.set)
+        log_scroll.pack(side="right", fill="y")
+        self.train_log.pack(side="left", fill="both", expand=True)
+        self.train_log.configure(state="disabled")
+
+        # Buttons row
+        btn_row = ttk.Frame(right_card, style="Card.TFrame")
+        btn_row.pack(fill="x", pady=(15, 0))
+
+        self.btn_train = ttk.Button(btn_row, text="🚀 START TRAINING", command=self._start_training,
+                                     style="Primary.TButton")
+        self.btn_train.pack(side="left", fill="x", expand=True, padx=(0, 5))
+
+        self.btn_view_results = ttk.Button(btn_row, text="📊 VIEW RESULTS", command=self._view_training_results,
+                                            style="Secondary.TButton")
+        self.btn_view_results.pack(side="left", fill="x", expand=True, padx=(5, 0))
+
+        # Populate sessions on init
+        self.root.after(100, self._refresh_training_sessions)
+
+    def _on_train_type_change(self):
+        """Show/hide user head options based on selection."""
+        # Guard: optuna widgets may not exist yet during init
+        has_optuna = hasattr(self, "optuna_check")
+        
+        if self.train_type_var.get() == "user_head":
+            self.user_head_frame.pack(fill="x", pady=5)
+            if has_optuna:
+                self.optuna_check.configure(state="disabled")
+                self.optuna_var.set(False)
+                self.optuna_trials_frame.pack_forget()
+        else:
+            self.user_head_frame.pack_forget()
+            if has_optuna:
+                self.optuna_check.configure(state="normal")
+
+    def _on_optuna_change(self):
+        """Show/hide Optuna trials setting based on checkbox."""
+        if self.optuna_var.get():
+            self.optuna_trials_frame.pack(fill="x", pady=5)
+        else:
+            self.optuna_trials_frame.pack_forget()
+
+    def _refresh_training_sessions(self):
+        """Scan logs directory and populate session tree."""
+        self.session_tree.delete(*self.session_tree.get_children())
+        logs_dir = Path(__file__).resolve().parent / "logs"
+        if not logs_dir.exists():
+            return
+
+        for user_dir in sorted(logs_dir.iterdir()):
+            if not user_dir.is_dir():
+                continue
+            user_node = self.session_tree.insert("", "end", text=f"📁 {user_dir.name}", open=False, tags=("user",))
+            sessions = sorted(user_dir.glob("session_*/session_data.csv"))
+            for sess in sessions:
+                sess_name = sess.parent.name
+                self.session_tree.insert(user_node, "end", text=f"  📄 {sess_name}",
+                                          values=(str(sess),), tags=("session",))
+
+    def _select_all_sessions(self):
+        """Select all items in session tree."""
+        def select_recursive(item):
+            self.session_tree.selection_add(item)
+            for child in self.session_tree.get_children(item):
+                select_recursive(child)
+        for item in self.session_tree.get_children():
+            select_recursive(item)
+
+    def _get_selected_session_paths(self):
+        """Get list of selected session CSV paths."""
+        paths = []
+        for item in self.session_tree.selection():
+            tags = self.session_tree.item(item, "tags")
+            if "session" in tags:
+                vals = self.session_tree.item(item, "values")
+                if vals:
+                    paths.append(vals[0])
+            elif "user" in tags:
+                # If user folder selected, include all its sessions
+                for child in self.session_tree.get_children(item):
+                    vals = self.session_tree.item(child, "values")
+                    if vals:
+                        paths.append(vals[0])
+        return list(set(paths))  # Dedupe
+
+    def _log_training(self, msg):
+        """Append message to training log."""
+        self.train_log.configure(state="normal")
+        self.train_log.insert("end", msg + "\n")
+        self.train_log.see("end")
+        self.train_log.configure(state="disabled")
+
+    def _start_training(self):
+        """Start model training as background subprocess."""
+        print("[DEBUG] _start_training called")
+        if self.is_training:
+            self.log("Training already in progress.")
+            return
+        if self.is_running:
+            self.log("Cannot train while a session is running.")
+            return
+
+        selected = self._get_selected_session_paths()
+        print(f"[DEBUG] Selected {len(selected)} sessions")
+        if not selected:
+            self.log("Select at least one session to train on.")
+            return
+
+        train_type = self.train_type_var.get()
+        user_head_name = self.user_head_name_var.get().strip()
+        print(f"[DEBUG] train_type={train_type}, user_head_name='{user_head_name}'")
+        use_optuna = self.optuna_var.get() and train_type == "base"
+        try:
+            optuna_trials = int(self.optuna_trials_var.get())
+        except ValueError:
+            optuna_trials = 30
+
+        if train_type == "user_head" and not user_head_name:
+            self.log("Enter a user name for the head artifact.")
+            print("[DEBUG] Missing user name for user_head training")
+            return
+        
+        print("[DEBUG] Starting training worker thread...")
+
+        # Lock UI
+        self.is_training = True
+        self.btn_train.configure(state="disabled", text="Training...")
+        self.btn_start.configure(state="disabled")
+        self.train_progress.start(10)
+        self.train_status_var.set("Training in progress...")
+        self.train_log.configure(state="normal")
+        self.train_log.delete("1.0", "end")
+        self.train_log.configure(state="disabled")
+
+        mode = f"{train_type} + Optuna ({optuna_trials} trials)" if use_optuna else train_type
+        self._log_training(f"Starting {mode} training with {len(selected)} session(s)...")
+
+        # Run training in background thread
+        def _worker():
+            import subprocess
+            import sys
+            try:
+                # Write sessions to a temp file to avoid command-line length limits on Windows
+                import tempfile
+                sessions_file = tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False, encoding='utf-8')
+                for s in selected:
+                    sessions_file.write(s + '\n')
+                sessions_file.close()
+                
+                if train_type == "base":
+                    # Run train_lgbm.py with selected sessions
+                    script = Path(__file__).resolve().parent.parent / "research" / "LightGBM" / "train_lgbm.py"
+                    cmd = [sys.executable, str(script), "--sessions-file", sessions_file.name]
+                    # Add Optuna optimization if enabled
+                    if use_optuna:
+                        cmd.append("--optimize")
+                        cmd.extend(["--trials", str(optuna_trials)])
+                else:
+                    # Run train_user_head.py with selected sessions
+                    script = Path(__file__).resolve().parent.parent / "research" / "LightGBM" / "train_user_head.py"
+                    cmd = [sys.executable, str(script), "--sessions-file", sessions_file.name, "--suffix", user_head_name.replace(" ", "_")]
+
+                self.root.after(0, lambda: self._log_training(f"Running: {' '.join(cmd)}"))
+
+                proc = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    bufsize=1,
+                    cwd=str(Path(__file__).resolve().parent.parent)
+                )
+                self.training_process = proc
+
+                for line in proc.stdout:
+                    line = line.rstrip()
+                    if line:
+                        self.root.after(0, lambda l=line: self._log_training(l))
+
+                proc.wait()
+                success = proc.returncode == 0
+                self.root.after(0, lambda: self._finish_training(success))
+
+            except Exception as e:
+                self.root.after(0, lambda: self._log_training(f"Error: {e}"))
+                self.root.after(0, lambda: self._finish_training(False))
+            finally:
+                # Cleanup temp sessions file
+                try:
+                    import os
+                    if 'sessions_file' in dir() and sessions_file and os.path.exists(sessions_file.name):
+                        os.unlink(sessions_file.name)
+                except Exception:
+                    pass
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _finish_training(self, success: bool):
+        """Reset UI after training completes."""
+        self.is_training = False
+        self.training_process = None
+        self.train_progress.stop()
+
+        if success:
+            self.train_status_var.set("✓ Training completed successfully!")
+            self._log_training("Training finished successfully.")
+            self.btn_train.configure(text="✓ Done!")
+        else:
+            self.train_status_var.set("✗ Training failed")
+            self._log_training("Training failed. Check log above.")
+            self.btn_train.configure(text="✗ Failed")
+
+        # Restore button after delay
+        self.root.after(2000, self._restore_train_button)
+
+    def _restore_train_button(self):
+        """Restore train button to normal state."""
+        self.btn_train.configure(state="normal", text="🚀 START TRAINING")
+        if not self.is_running:
+            self.btn_start.configure(state="normal")
+
+    def _view_training_results(self):
+        """Open a window displaying training result plots."""
+        results_dir = Path(__file__).resolve().parent.parent / "research" / "LightGBM" / "results" / "plots"
+        
+        if not results_dir.exists():
+            messagebox.showinfo("No Results", "No training results found. Run training first.")
+            return
+        
+        # Find available plots
+        plots = list(results_dir.glob("*.png"))
+        if not plots:
+            messagebox.showinfo("No Results", "No plot images found in results directory.")
+            return
+        
+        # Create results window
+        results_win = tk.Toplevel(self.root)
+        results_win.title("Training Results")
+        results_win.geometry("900x700")
+        results_win.configure(bg=self.P["bg"])
+        
+        # Header
+        header = ttk.Frame(results_win, style="TFrame")
+        header.pack(fill="x", padx=20, pady=(20, 10))
+        ttk.Label(header, text="📊 Model Training Results", style="H1.TLabel").pack(anchor="w")
+        ttk.Label(header, text=f"Found {len(plots)} result plot(s)", style="Sub.TLabel").pack(anchor="w")
+        
+        # Plot selector
+        selector_frame = ttk.Frame(results_win, style="TFrame")
+        selector_frame.pack(fill="x", padx=20, pady=(0, 10))
+        ttk.Label(selector_frame, text="Select Plot:", style="Sub.TLabel").pack(side="left")
+        
+        plot_names = [p.stem for p in sorted(plots)]
+        plot_var = tk.StringVar(value=plot_names[0] if plot_names else "")
+        plot_combo = ttk.Combobox(selector_frame, textvariable=plot_var, values=plot_names, state="readonly", width=40)
+        plot_combo.pack(side="left", padx=(10, 0))
+        
+        # Image display area
+        img_frame = ttk.Frame(results_win, style="Card.TFrame", padding=10)
+        img_frame.pack(fill="both", expand=True, padx=20, pady=(0, 20))
+        
+        img_label = ttk.Label(img_frame, text="Select a plot to view", style="CardLabel.TLabel")
+        img_label.pack(fill="both", expand=True)
+        
+        # Store reference to prevent garbage collection
+        results_win._photo_ref = None
+        
+        def load_plot(*_):
+            selected = plot_var.get()
+            if not selected:
+                return
+            plot_path = results_dir / f"{selected}.png"
+            if not plot_path.exists():
+                return
+            try:
+                from PIL import Image, ImageTk
+                img = Image.open(plot_path)
+                # Scale to fit window while maintaining aspect ratio
+                max_w, max_h = 850, 550
+                img.thumbnail((max_w, max_h), Image.Resampling.LANCZOS)
+                photo = ImageTk.PhotoImage(img)
+                img_label.configure(image=photo, text="")
+                results_win._photo_ref = photo  # Keep reference
+            except ImportError:
+                img_label.configure(text=f"PIL/Pillow not installed.\nPlot saved at:\n{plot_path}", image="")
+            except Exception as e:
+                img_label.configure(text=f"Error loading image: {e}", image="")
+        
+        plot_combo.bind("<<ComboboxSelected>>", load_plot)
+        
+        # Open folder button
+        def open_folder():
+            import os
+            os.startfile(str(results_dir)) if os.name == 'nt' else os.system(f'open "{results_dir}"')
+        
+        ttk.Button(selector_frame, text="📁 Open Folder", command=open_folder, style="Compact.TButton").pack(side="right")
+        
+        # Load first plot
+        if plot_names:
+            results_win.after(100, load_plot)
+
+    # ====================== ANALYSIS TAB ======================
+    def _build_analysis_tab(self, parent):
+        """Build the Analysis tab UI for viewing past sessions."""
+        # Main container
+        container = ttk.Frame(parent, style="TFrame")
+        container.pack(fill="both", expand=True, padx=30, pady=20)
+        
+        # Title
+        ttk.Label(container, text="📊  Session Analysis", style="H1.TLabel", 
+                 font=("Segoe UI", 20, "bold")).pack(anchor="w", pady=(0, 5))
+        ttk.Label(container, text="Review and analyze past training sessions", 
+                 style="Sub.TLabel").pack(anchor="w", pady=(0, 20))
+        
+        # Selection card
+        select_card = ttk.Frame(container, style="Card.TFrame", padding=20)
+        select_card.pack(fill="x", pady=(0, 15))
+        
+        ttk.Label(select_card, text="SELECT SESSION", style="CardHeader.TLabel").pack(anchor="w", pady=(0, 15))
+        
+        # Subject selection
+        ttk.Label(select_card, text="Subject / User", style="CardLabel.TLabel", 
+                 font=("Segoe UI", 10, "bold")).pack(anchor="w", pady=(0, 5))
+        subject_row = ttk.Frame(select_card, style="Card.TFrame")
+        subject_row.pack(fill="x", pady=(0, 15))
+        
+        self.subject_combo = ttk.Combobox(subject_row, textvariable=self.subject_var, 
+                                          state="readonly", height=15, font=("Segoe UI", 11), width=40)
+        self.subject_combo.pack(side="left", padx=(0, 10))
+        self.subject_combo.bind("<<ComboboxSelected>>", self.on_subject_selected)
+        ttk.Button(subject_row, text="🔄 Refresh", style="Compact.TButton", 
+                  command=self.refresh_analysis_subjects).pack(side="left")
+        
+        # Session selection
+        ttk.Label(select_card, text="Session", style="CardLabel.TLabel", 
+                 font=("Segoe UI", 10, "bold")).pack(anchor="w", pady=(0, 5))
+        session_row = ttk.Frame(select_card, style="Card.TFrame")
+        session_row.pack(fill="x")
+        
+        self.session_combo = ttk.Combobox(session_row, textvariable=self.session_var, 
+                                          state="readonly", height=15, font=("Segoe UI", 11), width=40)
+        self.session_combo.pack(side="left", padx=(0, 10))
+        self.session_combo.bind("<<ComboboxSelected>>", self.load_analysis_plot)
+        ttk.Button(session_row, text="📊 Load Plot", style="CompactPrimary.TButton", 
+                  command=self.load_analysis_plot).pack(side="left")
+        
+        # Plot display card
+        self.analysis_plot_card = ttk.Frame(container, style="Card.TFrame", padding=20)
+        self.analysis_plot_card.pack(fill="both", expand=True)
+        
+        # Header with zoom controls
+        plot_header = ttk.Frame(self.analysis_plot_card, style="Card.TFrame")
+        plot_header.pack(fill="x", pady=(0, 15))
+        
+        ttk.Label(plot_header, text="SESSION PLOT", style="CardHeader.TLabel").pack(side="left")
+        
+        # Zoom controls
+        zoom_frame = ttk.Frame(plot_header, style="Card.TFrame")
+        zoom_frame.pack(side="right")
+        
+        ttk.Button(zoom_frame, text="🔍−", style="Compact.TButton", width=4, 
+                  command=self.zoom_out_analysis).pack(side="left", padx=2)
+        
+        self.zoom_level_var = tk.StringVar(value="100%")
+        ttk.Label(zoom_frame, textvariable=self.zoom_level_var, style="CardLabel.TLabel", 
+                 font=("Segoe UI", 9, "bold"), width=6).pack(side="left", padx=5)
+        
+        ttk.Button(zoom_frame, text="🔍+", style="Compact.TButton", width=4, 
+                  command=self.zoom_in_analysis).pack(side="left", padx=2)
+        
+        ttk.Button(zoom_frame, text="⊡", style="Compact.TButton", width=4, 
+                  command=self.zoom_fit_analysis).pack(side="left", padx=(8, 0))
+        
+        # Scrollable plot area
+        plot_scroll_frame = ttk.Frame(self.analysis_plot_card, style="Card.TFrame")
+        plot_scroll_frame.pack(fill="both", expand=True)
+        
+        # Canvas with scrollbars for zoom
+        self.analysis_plot_canvas = tk.Canvas(plot_scroll_frame, bg=self.P["card_bg"], highlightthickness=0, bd=0)
+        h_scroll = ttk.Scrollbar(plot_scroll_frame, orient="horizontal", command=self.analysis_plot_canvas.xview,
+                                style="Horizontal.TScrollbar")
+        v_scroll = ttk.Scrollbar(plot_scroll_frame, orient="vertical", command=self.analysis_plot_canvas.yview,
+                                style="Vertical.TScrollbar")
+        
+        self.analysis_plot_canvas.configure(xscrollcommand=h_scroll.set, yscrollcommand=v_scroll.set)
+        
+        v_scroll.pack(side="right", fill="y")
+        h_scroll.pack(side="bottom", fill="x")
+        self.analysis_plot_canvas.pack(side="left", fill="both", expand=True)
+        
+        # Plot label inside canvas (will be updated with image)
+        self.analysis_plot_label = ttk.Label(self.analysis_plot_canvas, text="Select a session to view its plot", 
+                 style="CardSub.TLabel", anchor="center")
+        self.analysis_plot_window = self.analysis_plot_canvas.create_window(0, 0, window=self.analysis_plot_label, 
+                                                                            anchor="nw")
+        
+        # Store reference to prevent garbage collection and track zoom
+        self.analysis_photo_ref = None
+        self.analysis_original_image = None
+        self.analysis_zoom_level = 1.0
+        
+        # Bind canvas resize to update plot display
+        self.analysis_plot_canvas.bind("<Configure>", lambda e: self._on_analysis_canvas_resize())
+        
+        # Initialize data
+        self.root.after(100, self.refresh_analysis_subjects)
+    
+    def _on_analysis_canvas_resize(self):
+        """Handle canvas resize events to reflow the plot."""
+        if self.analysis_original_image and hasattr(self, '_resize_timer'):
+            # Cancel pending resize update
+            self.root.after_cancel(self._resize_timer)
+        
+        if self.analysis_original_image:
+            # Debounce resize events (wait 200ms after last resize)
+            self._resize_timer = self.root.after(200, self._update_analysis_plot_display)
+    
+    def load_analysis_plot(self, event=None):
+        """Load and display the selected session's plot inline."""
+        subject = self.subject_var.get()
+        session_name = self.session_var.get()
+
+        if not subject or not session_name or session_name == "No sessions":
+            self.analysis_plot_label.configure(text="Select a session to view its plot", image="")
+            self.analysis_original_image = None
+            return
+        
+        # Construct path from both dropdowns
+        base_dir = Path(__file__).resolve().parent / "logs" / subject / session_name
+        plot_path = base_dir / "BPM_plot.png"
+        
+        if not plot_path.exists():
+            # If PNG missing, try generate it on demand
+            csv_path = base_dir / "session_data.csv"
+            if csv_path.exists():
+                try:
+                    from utils.plotter import generate_post_session_plot
+                    generate_post_session_plot(base_dir)
+                except Exception as e:
+                    print(f"Plot generation failed: {e}")
+        
+        if not plot_path.exists():
+            self.analysis_plot_label.configure(text=f"No plot found for {session_name}\n(Session may not have completed)", 
+                                              image="")
+            self.analysis_original_image = None
+            return
+            
+        # Load and display the image
+        try:
+            from PIL import Image, ImageTk
+            img = Image.open(plot_path)
+            
+            # Store original image for zoom operations
+            self.analysis_original_image = img
+            self.analysis_zoom_level = 1.0
+            
+            # Display at fit-to-window size initially
+            self._update_analysis_plot_display()
+            
+        except ImportError:
+            self.analysis_plot_label.configure(text=f"PIL/Pillow not installed.\nPlot saved at:\n{plot_path}", image="")
+            self.analysis_original_image = None
+        except Exception as e:
+            self.analysis_plot_label.configure(text=f"Error loading plot: {e}", image="")
+            self.analysis_original_image = None
+    
+    def _update_analysis_plot_display(self):
+        """Update the analysis plot display with current zoom level."""
+        if not self.analysis_original_image:
+            return
+        
+        try:
+            from PIL import Image, ImageTk
+            
+            # Get canvas dimensions
+            canvas_width = self.analysis_plot_canvas.winfo_width()
+            canvas_height = self.analysis_plot_canvas.winfo_height()
+            
+            # Use default size if canvas not yet rendered
+            if canvas_width < 10:
+                canvas_width = 900
+            if canvas_height < 10:
+                canvas_height = 450
+            
+            # Calculate display size based on zoom level
+            img = self.analysis_original_image.copy()
+            orig_w, orig_h = img.size
+            
+            # Calculate fit-to-window size
+            fit_ratio = min(canvas_width / orig_w, canvas_height / orig_h)
+            fit_ratio = min(fit_ratio, 1.0)  # Don't upscale beyond original
+            
+            # Apply zoom on top of fit ratio
+            display_ratio = fit_ratio * self.analysis_zoom_level
+            
+            new_w = int(orig_w * display_ratio)
+            new_h = int(orig_h * display_ratio)
+            
+            # Resize image
+            img_resized = img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+            photo = ImageTk.PhotoImage(img_resized)
+            
+            # Update label
+            self.analysis_plot_label.configure(image=photo, text="")
+            self.analysis_photo_ref = photo  # Keep reference
+            
+            # Update canvas scroll region
+            self.analysis_plot_canvas.configure(scrollregion=(0, 0, new_w, new_h))
+            
+            # Update zoom level display
+            zoom_percent = int(self.analysis_zoom_level * 100)
+            self.zoom_level_var.set(f"{zoom_percent}%")
+            
+        except Exception as e:
+            print(f"Error updating plot display: {e}")
+    
+    def zoom_in_analysis(self):
+        """Zoom in on the analysis plot."""
+        if not self.analysis_original_image:
+            return
+        
+        # Increase zoom by 25%
+        self.analysis_zoom_level = min(self.analysis_zoom_level * 1.25, 5.0)  # Max 500%
+        self._update_analysis_plot_display()
+    
+    def zoom_out_analysis(self):
+        """Zoom out on the analysis plot."""
+        if not self.analysis_original_image:
+            return
+        
+        # Decrease zoom by 25%
+        self.analysis_zoom_level = max(self.analysis_zoom_level / 1.25, 0.25)  # Min 25%
+        self._update_analysis_plot_display()
+    
+    def zoom_fit_analysis(self):
+        """Reset zoom to fit the analysis plot to window."""
+        if not self.analysis_original_image:
+            return
+        
+        self.analysis_zoom_level = 1.0
+        self._update_analysis_plot_display()
+
+    # ====================== THEME TOGGLE ======================
+    def toggle_theme(self):
+        """Toggle between light and dark mode."""
+        self.theme_mode = "light" if self.theme_mode == "dark" else "dark"
+        self.P = self.themes[self.theme_mode]
+        
+        # Update theme button icon (sun for dark mode, moon for light mode)
+        theme_icon = "☀" if self.theme_mode == "dark" else "☾"
+        self.theme_btn.configure(text=theme_icon)
+        
+        # Apply theme to root
+        self.root.configure(bg=self.P["bg"])
+        
+        # Update canvas backgrounds  
+        self.canvas_sidebar.configure(bg=self.P["card_bg"])
+        self.led_canvas.configure(bg=self.P["bg"])
+        
+        # Update analysis plot canvas if it exists
+        if hasattr(self, 'analysis_plot_canvas'):
+            self.analysis_plot_canvas.configure(bg=self.P["card_bg"])
+        
+        # Update BPM label color
+        if hasattr(self, 'bpm_val_label'):
+            self.bpm_val_label.configure(foreground=self.P["text_main"], background=self.P["card_bg"])
+        
+        # Update all plot card backgrounds
+        try:
+            for widget in self.root.winfo_children():
+                self._update_widget_colors(widget)
+        except:
+            pass
+        
+        # Update matplotlib figure
+        self.figure.patch.set_facecolor(self.P.get("plot_bg", self.P["card_bg"]))
+        
+        # Update plotter theme
+        if hasattr(self, 'plotter'):
+            self.plotter.P = self.P
+            self.plotter._style_axes(self.plotter.ax1, "LIVE BPM TRACE", "BPM", show_x=True)
+        
+        try:
+            self.canvas.draw_idle()
+        except:
+            pass
+        
+        # Reconfigure all styles
+        self._apply_theme_styles()
+        
+        self.log(f"Switched to {self.theme_mode.title()} Mode")
+
+    def _update_widget_colors(self, widget):
+        """Recursively update widget backgrounds for theme."""
+        try:
+            # Skip if widget doesn't exist
+            if not widget.winfo_exists():
+                return
+                
+            widget_class = widget.winfo_class()
+            
+            # Update Frame backgrounds
+            if widget_class == "Frame" or widget_class == "TFrame":
+                try:
+                    # Check if it's a Card frame
+                    if hasattr(widget, 'cget'):
+                        try:
+                            style_name = widget.cget('style')
+                            if 'Card' in str(style_name):
+                                widget.configure(style="Card.TFrame")
+                        except:
+                            pass
+                except:
+                    pass
+            
+            # Update tk.Text widgets (training log, etc.)
+            elif widget_class == "Text":
+                try:
+                    widget.configure(bg=self.P["bg"], 
+                                   fg=self.P["text_main"], 
+                                   insertbackground=self.P["text_main"])
+                except:
+                    pass
+            
+            # Update tk.Canvas widgets (plots, LED canvas, etc.)
+            elif widget_class == "Canvas":
+                try:
+                    # Check if it's a card canvas or background canvas
+                    current_bg = widget.cget('bg')
+                    # If it was card-colored, update to new card color
+                    if current_bg in [self.themes["dark"]["card_bg"], self.themes["light"]["card_bg"]]:
+                        widget.configure(bg=self.P["card_bg"])
+                    else:
+                        # Otherwise assume it's a main background canvas
+                        widget.configure(bg=self.P["bg"])
+                except:
+                    pass
+            
+            # Recursively update children
+            for child in widget.winfo_children():
+                self._update_widget_colors(child)
+        except:
+            pass
+    
+    def _apply_theme_styles(self):
+        """Reapply all ttk styles with current theme."""
+        style = ttk.Style()
+        
+        # Reapply all the styles with current theme colors
+        style.configure(".", background=self.P["bg"], foreground=self.P["text_main"])
+        style.configure("TFrame", background=self.P["bg"], relief="flat", borderwidth=0, highlightthickness=0)
+        # Card styling based on theme
+        if self.theme_mode == "light":
+            style.configure("Card.TFrame", background=self.P["card_bg"], relief="flat", borderwidth=0, highlightthickness=0)
+        else:
+            style.configure("Card.TFrame", background=self.P["card_bg"], relief="flat", borderwidth=0, highlightthickness=0)
+        style.configure("H1.TLabel", foreground=self.P["text_main"], background=self.P["bg"])
+        style.configure("CardHeader.TLabel", foreground=self.P["accent"], background=self.P["card_bg"])
+        style.configure("Sub.TLabel", foreground=self.P["text_sub"], background=self.P["bg"])
+        style.configure("CardLabel.TLabel", background=self.P["card_bg"], foreground=self.P["text_main"])
+        style.configure("NavStatus.TLabel", background=self.P["bg"], foreground=self.P["accent"])
+        style.configure("CardSub.TLabel", foreground=self.P["text_sub"], background=self.P["card_bg"])
+        
+        # Button styles
+        style.configure("Primary.TButton", background=self.P["accent"], foreground="white")
+        style.map("Primary.TButton", background=[("active", self.P["accent_hover"])])
+        style.configure("Danger.TButton", background=self.P["danger"], foreground="white")
+        style.configure("Success.TButton", background=self.P["success"], foreground="white")
+        secondary_bg = "#64748b" if self.theme_mode == "light" else "#475569"
+        style.configure("Secondary.TButton", background=secondary_bg, foreground="white")
+        style.map("Secondary.TButton", background=[("active", "#475569" if self.theme_mode == "light" else "#334155")])
+        compact_bg = "#f1f5f9" if self.theme_mode == "light" else self.P["input_bg"]
+        style.configure("Compact.TButton", background=compact_bg, foreground=self.P["text_input"])
+        style.map("Compact.TButton", background=[("active", "#e2e8f0" if self.theme_mode == "light" else "#f3f4f6")])
+        style.configure("CompactPrimary.TButton", background=self.P["accent"], foreground="white")
+        style.configure("Help.TButton", background=self.P["card_bg"], foreground=self.P["accent"])
+        
+        # Theme button
+        style.configure("Theme.TButton", background=self.P["bg"], foreground=self.P["text_main"])
+        style.map("Theme.TButton", background=[("active", self.P["highlight"])], 
+                 foreground=[("active", self.P["accent"])])
+        
+        # Input styles - no borders/outlines, darker background
+        style.configure("TEntry", 
+                       fieldbackground=self.P["input_bg"], 
+                       foreground=self.P["text_input"], 
+                       borderwidth=0, 
+                       relief="flat", 
+                       highlightthickness=0,
+                       insertcolor=self.P["text_input"],
+                       bordercolor=self.P["card_bg"],
+                       lightcolor=self.P["card_bg"],
+                       darkcolor=self.P["card_bg"],
+                       focuscolor="")
+        style.map("TEntry",
+                 fieldbackground=[("focus", self.P["input_bg"])],
+                 bordercolor=[("focus", self.P["card_bg"]), ("!focus", self.P["card_bg"])],
+                 lightcolor=[("focus", self.P["card_bg"]), ("!focus", self.P["card_bg"])],
+                 darkcolor=[("focus", self.P["card_bg"]), ("!focus", self.P["card_bg"])])
+        style.configure("TCombobox", 
+                       fieldbackground=self.P["input_bg"], 
+                       foreground=self.P["text_input"],
+                       background=self.P["card_bg"], 
+                       borderwidth=0, 
+                       relief="flat", 
+                       highlightthickness=0,
+                       selectbackground=self.P["accent"],
+                       selectforeground="white",
+                       bordercolor=self.P["card_bg"],
+                       lightcolor=self.P["card_bg"],
+                       darkcolor=self.P["card_bg"],
+                       focuscolor="",
+                       insertwidth=0)
+        style.map("TCombobox", 
+                 fieldbackground=[("readonly", self.P["input_bg"])], 
+                 foreground=[("readonly", self.P["text_input"])],
+                 background=[("readonly", self.P["card_bg"])],
+                 bordercolor=[("focus", self.P["card_bg"]), ("!focus", self.P["card_bg"])],
+                 lightcolor=[("focus", self.P["card_bg"]), ("!focus", self.P["card_bg"])],
+                 darkcolor=[("focus", self.P["card_bg"]), ("!focus", self.P["card_bg"])])
+        style.configure("TRadiobutton", background=self.P["card_bg"], foreground=self.P["text_main"],
+                       borderwidth=0, relief="flat", highlightthickness=0)
+        style.configure("TCheckbutton", background=self.P["bg"], foreground=self.P["text_main"],
+                       borderwidth=0, relief="flat", highlightthickness=0)
+        
+        # Other components - borderless
+        style.configure("TPanedwindow", background=self.P["bg"], borderwidth=0, relief="flat")
+        style.configure("TSeparator", background=self.P["border"])
+        style.configure("Treeview", background=self.P["card_bg"], foreground=self.P["text_main"], 
+                       fieldbackground=self.P["card_bg"], borderwidth=0,
+                       relief="flat", highlightthickness=0,
+                       bordercolor=self.P["card_bg"],
+                       lightcolor=self.P["card_bg"],
+                       darkcolor=self.P["card_bg"])
+        style.configure("Treeview.Heading",
+                       background=self.P["card_bg"],
+                       foreground=self.P["text_main"],
+                       borderwidth=0,
+                       relief="flat")
+        style.map("Treeview", background=[("selected", self.P["accent"])], foreground=[("selected", "white")])
+        style.configure("TNotebook", 
+                       background=self.P["bg"], 
+                       borderwidth=0, 
+                       relief="flat", 
+                       highlightthickness=0,
+                       bordercolor=self.P["bg"],
+                       lightcolor=self.P["bg"],
+                       darkcolor=self.P["bg"],
+                       tabmargins=[0, 0, 0, 0])
+        # Remove ALL border elements from the notebook
+        style.layout("TNotebook", [
+            ("Notebook.client", {"sticky": "nswe", "border": 0})
+        ])
+        style.layout("TNotebook.Tab", [
+            ("Notebook.tab", {
+                "sticky": "nswe",
+                "children": [
+                    ("Notebook.padding", {
+                        "side": "top",
+                        "sticky": "nswe",
+                        "children": [
+                            ("Notebook.label", {"side": "top", "sticky": ""})
+                        ]
+                    })
+                ]
+            })
+        ])
+        tab_bg = self.P["card_bg"] if self.theme_mode == "light" else self.P["border"]
+        style.configure("TNotebook.Tab", background=tab_bg, foreground=self.P["text_sub"], 
+                       borderwidth=0, relief="flat",
+                       focuscolor="",
+                       lightcolor=self.P["bg"],
+                       darkcolor=self.P["bg"],
+                       bordercolor=self.P["bg"])
+        style.map("TNotebook.Tab", 
+                 background=[("selected", self.P["accent"])], 
+                 foreground=[("selected", "white")],
+                 lightcolor=[("selected", self.P["bg"]), ("!selected", self.P["bg"])],
+                 darkcolor=[("selected", self.P["bg"]), ("!selected", self.P["bg"])],
+                 bordercolor=[("selected", self.P["bg"]), ("!selected", self.P["bg"])])
+        style.configure("TScale", background=self.P["card_bg"], troughcolor=self.P["border"])
+        style.configure("TProgressbar", troughcolor=self.P["border"], background=self.P["accent"])
+        
+        # Scrollbar - blend with background
+        style.configure("Vertical.TScrollbar",
+                       background=self.P["card_bg"],
+                       troughcolor=self.P["card_bg"],
+                       borderwidth=0,
+                       arrowsize=0,
+                       relief="flat")
+        style.configure("Horizontal.TScrollbar",
+                       background=self.P["card_bg"],
+                       troughcolor=self.P["card_bg"],
+                       borderwidth=0,
+                       arrowsize=0,
+                       relief="flat")
 
     def show_attack_help(self):
         msg = ("Controls how fast the music SPEEDS UP when you accelerate.\n\n"

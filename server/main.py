@@ -15,10 +15,11 @@ import time
 import serial
 import argparse
 import threading
+from pathlib import Path
 from utils.midi_player import MidiBeatSync
 from utils.logger import Logger
 from utils.BPM_estimation import BPM_estimation
-from utils.comms import session_handshake, handle_engine_command, handle_step
+from utils.comms import session_handshake, handle_engine_command, handle_step, send_calibration_command
 from utils.main_helper_functions import retrain_prediction_model
 from utils.LGBM_predictor import LGBMPredictor
 # from utils.safety import safe_execute
@@ -86,6 +87,23 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Disable prediction model for this run",
     )
+    parser.add_argument(
+        "--model-path",
+        type=str,
+        default=None,
+        help="Path to prediction model (.joblib). If not specified, uses default base model.",
+    )
+    parser.add_argument(
+        "--hybrid",
+        action="store_true",
+        help="Enable hybrid mode (starts dynamic, locks if steady)",
+    )
+    parser.add_argument(
+        "--calibrate-weight",
+        type=int,
+        default=None,
+        help="Run weight calibration only (provide margin), then exit",
+    )
     return parser.parse_args()
 
 def start_stdin_listener(command_queue):
@@ -107,9 +125,29 @@ def main(args, status_callback=print, stop_event=None, session_dir_callback=None
     midi_path = args.midi_path
     smoothing_window = getattr(args, 'smoothing', 3)
     stride = getattr(args, 'stride', 1)
+    run_type = "manual" if args.manual else ("hybrid" if getattr(args, "hybrid", False) else "dynamic")
+
+    # Calibration-only flow: open serial, send CAL_WEIGHT, and exit.
+    if getattr(args, "calibrate_weight", None) is not None:
+        margin = int(args.calibrate_weight)
+        class _Logger:
+            def log(self_inner, msg): status_callback(msg)
+        try:
+            with serial.Serial(args.serial_port, 115200, timeout=1.0) as ser:
+                ok = send_calibration_command(ser, _Logger(), margin=margin, retries=3)
+                status_callback("Calibration completed." if ok else "Calibration failed.")
+        except Exception as e:
+            status_callback(f"Calibration error: {e}")
+        return None, None, None
 
     # 1. Initialize Logger 
-    logger = Logger(gui_callback=status_callback, session_name=getattr(args, 'session_name', None), smoothing_window=smoothing_window, stride=stride)
+    logger = Logger(
+        gui_callback=status_callback,
+        session_name=getattr(args, 'session_name', None),
+        smoothing_window=smoothing_window,
+        stride=stride,
+        run_type=run_type,
+    )
     
     # OUTPUT SESSION DIR FOR GUI PARSING
     # The GUI listens for "SESSION_DIR:..." to know where to save the plot.
@@ -150,14 +188,17 @@ def main(args, status_callback=print, stop_event=None, session_dir_callback=None
             logger.log(f"Using default song BPM: {player.songBPM}")
     else:
         logger.log("Starting in DYNAMIC MODE")
+    logger.log(f"Run type: {run_type}")
     
     # 4. Initialize prediction model (currently LightGBM predictor)
     if args.disable_prediction:
         prediction_model = None
         logger.log("Prediction model disabled")
     else:
-        prediction_model = LGBMPredictor()
-        logger.log("Prediction model enabled (LightGBM)")
+        model_path = args.model_path if hasattr(args, 'model_path') else None
+        prediction_model = LGBMPredictor(model_path=model_path, run_type=run_type)
+        model_name = Path(model_path).name if model_path else "default base model"
+        logger.log(f"Prediction model enabled: {model_name}")
     
     # 5. Initialize BPM Estimation
     bpm_estimation = BPM_estimation(
@@ -168,6 +209,8 @@ def main(args, status_callback=print, stop_event=None, session_dir_callback=None
         prediction_model=prediction_model,
         smoothing_window=smoothing_window,
         stride=stride,
+        run_type=run_type,
+        hybrid_mode=getattr(args, 'hybrid', False),
     )
     if args.alpha_up is not None:
         bpm_estimation.set_smoothing_alpha_up(args.alpha_up)
@@ -238,7 +281,19 @@ def main(args, status_callback=print, stop_event=None, session_dir_callback=None
             continue
 
         # handle the step
+        # TWEAK: Check for BUTTON messages first (BTN,<delta>)
         try:
+            line_str = raw_line.decode("utf-8", errors="ignore").strip()
+            if line_str.startswith("BTN,"):
+                parts = line_str.split(",")
+                if len(parts) >= 2:
+                    delta = float(parts[1])
+                    logger.log(f"HARDWARE: Button Delta Received: {delta}")
+                    
+                    # Refactored to BPM_estimation
+                    bpm_estimation.register_button_delta(delta)
+                continue
+
             bpm, instant_bpm, sensor_ts, foot = handle_step(raw_line, player.walkingBPM)
         except ValueError:
             time.sleep(0.001)

@@ -68,7 +68,7 @@ def tune_lgbm():
     best = {"mae": float("inf")}
 
     for w in window_grid:
-        X_lag, y, meta = build_lag_features(df, window_size=w)
+        X_lag, y, meta, mode_mapping = build_lag_features(df, window_size=w)
         if len(X_lag) < 20:
             continue
         X = np.concatenate([X_lag, meta], axis=1) if len(meta) > 0 else X_lag
@@ -120,6 +120,7 @@ def tune_lgbm():
                             "learning_rate": lr,
                             "n_estimators": ne,
                         },
+                        "mode_mapping": mode_mapping,
                         "y_test": y_test,
                         "preds": preds,
                     }
@@ -155,6 +156,17 @@ def tune_lgbm():
         "scaler": best["scaler"],
         "window_size": best["window_size"],
         "params": best["params"],
+        "feature_schema": {
+            "lags": {
+                "walking": best["window_size"],
+                "instant": best["window_size"],
+            },
+            "extra": ["smoothing_window", "stride", "mode"],
+            "mode_mapping": best.get("mode_mapping", {"unknown": 0.0}),
+            "order": ([f"walk_lag_{i}" for i in range(best["window_size"])] +
+                      [f"inst_lag_{i}" for i in range(best["window_size"])] +
+                      ["smoothing_window", "stride", "mode"]),
+        },
     }
     model_path = MODELS_DIR / "lgbm_model.joblib"
     joblib.dump(artifact, model_path)
