@@ -1,0 +1,5 @@
+Session log started at 2026-01-05_13-37-43 (t=0.000)
+[00:00:00.002] DEBUG: Attempting to initialize MidiBeatSync...
+[00:00:00.089] DEBUG: MidiBeatSync initialized successfully.
+[00:00:00.090] Starting in DYNAMIC MODE
+[00:00:00.090] Run type: hybrid
