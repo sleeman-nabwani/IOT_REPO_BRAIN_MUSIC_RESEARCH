@@ -300,9 +300,9 @@ class LivePlotter:
         self.show_half = half
 
     def _style_axes(self, ax, title, ylabel, show_x=False):
-        """Applies the dark theme, grid lines, and removes borders for a clean look."""
+        """Applies the theme colors, grid lines, and removes borders for a clean look."""
         P = self.P
-        ax.set_facecolor(P["card_bg"])
+        ax.set_facecolor(P.get("plot_bg", P["card_bg"]))
         ax.set_title(title, color=P["text_sub"], fontsize=9, fontweight="bold", loc="left", pad=10)
         ax.set_ylabel(ylabel, color=P["text_sub"], fontsize=8)
         
@@ -363,17 +363,20 @@ class LivePlotter:
             s = s.iloc[idx].reset_index(drop=True)
             step_events = step_events.iloc[idx].reset_index(drop=True)
         
-        # Song BPM: allow it to show even before steps, fill gaps
-        s = s.ffill().bfill()
-
-        # Force a starting point at t=0 for song BPM
+        # Song BPM: only show when music is actually playing (non-zero values)
+        # Don't force it to start at t=0 if session hasn't begun
         if len(t) == 0:
             return
-        if t.iloc[0] > 0 or pd.isna(t.iloc[0]):
-            t = pd.concat([pd.Series([0.0]), t], ignore_index=True)
-            s = pd.concat([pd.Series([s.iloc[0]]), s], ignore_index=True)
-            w = pd.concat([pd.Series([float("nan")]), w], ignore_index=True)
-            step_events = pd.concat([pd.Series([False]), step_events], ignore_index=True)
+        
+        # Find the first time when song actually starts (first non-zero song BPM)
+        first_song_idx = s[s > 0].first_valid_index() if (s > 0).any() else None
+        
+        if first_song_idx is not None:
+            # Song has started - fill gaps from first song point onward
+            s = s.ffill().bfill()
+        else:
+            # No song data yet - keep song BPM as NaN (won't display)
+            pass
 
         # Walking BPM: show only where steps occurred, connect gaps only between steps
         w = w.where(step_events, float("nan"))
