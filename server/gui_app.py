@@ -101,13 +101,33 @@ class GuiApp:
         style.configure("Secondary.TButton", font=("Segoe UI", 10, "bold"), background="#64748b", foreground="white", borderwidth=0, padding=(15, 10))
         style.map("Secondary.TButton", background=[("active", "#475569")])
         style.configure("Compact.TButton", background=self.P["input_bg"], foreground=self.P["text_input"], borderwidth=0, padding=(8, 4))
-        # INPUTS: Light BG, Dark Text
+        
+        # INPUTS: Keep SAME appearance when disabled (just lock interaction)
         style.configure("TEntry", fieldbackground=self.P["input_bg"], foreground=self.P["text_input"], padding=5, borderwidth=0)
+        style.map("TEntry", 
+                  fieldbackground=[("disabled", self.P["input_bg"]), ("readonly", self.P["input_bg"])],
+                  foreground=[("disabled", self.P["text_input"]), ("readonly", self.P["text_input"])])
+        
         style.configure("TCombobox", fieldbackground=self.P["input_bg"], foreground=self.P["text_input"], background=self.P["input_bg"])
-        style.map("TCombobox", fieldbackground=[("readonly", self.P["input_bg"])], foreground=[("readonly", self.P["text_input"])])
+        style.map("TCombobox", fieldbackground=[("readonly", self.P["input_bg"]), ("disabled", self.P["input_bg"])], 
+                  foreground=[("readonly", self.P["text_input"]), ("disabled", self.P["text_input"])])
+        
+        # Sliders: Keep same appearance when disabled
+        style.configure("TScale", background=self.P["card_bg"], troughcolor=self.P["input_bg"])
+        style.map("TScale", background=[("disabled", self.P["card_bg"])], troughcolor=[("disabled", self.P["input_bg"])])
         
         style.configure("TRadiobutton", background=self.P["card_bg"], foreground=self.P["text_main"], font=("Segoe UI", 10))
         style.map("TRadiobutton", indicatorcolor=[("selected", self.P["accent"])], background=[("active", self.P["card_bg"])])
+
+        # Checkbutton style - keep SAME color when disabled
+        style.configure("TCheckbutton", background=self.P["card_bg"], foreground=self.P["text_main"], font=("Segoe UI", 10))
+        style.map("TCheckbutton", 
+                  foreground=[("disabled", self.P["text_main"])],
+                  background=[("active", self.P["card_bg"]), ("disabled", self.P["card_bg"])])
+        
+        # Labels - keep same appearance when disabled
+        style.map("CardHeader.TLabel", foreground=[("disabled", self.P["text_sub"])], background=[("disabled", self.P["card_bg"])])
+        style.map("Sub.TLabel", foreground=[("disabled", self.P["text_sub"])], background=[("disabled", self.P["bg"])])
 
         # NEW: Compact Blue Button for "Set"
         style.configure("CompactPrimary.TButton", font=("Segoe UI", 9, "bold"), background=self.P["accent"], foreground="white", borderwidth=0, padding=(8, 4))
@@ -311,8 +331,98 @@ class GuiApp:
         self.rnd_slider.pack(side="left", fill="x", expand=True, padx=5)
 
         # Gamify Toggle
-        self.gamify_var = tk.BooleanVar(value=True)
+        self.gamify_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(self.random_settings_frame, text="Gamified (Time Limit & Hold)", variable=self.gamify_var, command=self.on_gamify_toggle).pack(anchor="w", padx=5, pady=5)
+
+        # Simple Mode Settings (Threshold & Steps)
+        # Threshold
+        self.lbl_match_spread = ttk.Label(self.random_settings_frame, text="Match Spread", style="CardHeader.TLabel")
+        self.lbl_match_spread.pack(anchor="w", padx=5)
+        f_thres = ttk.Frame(self.random_settings_frame, style="Card.TFrame")
+        f_thres.pack(fill="x", padx=5, pady=3)
+        self.random_simple_threshold_var = tk.StringVar(value="5.0")
+        e_thres = ttk.Entry(f_thres, textvariable=self.random_simple_threshold_var, width=5)
+        e_thres.pack(side="left", padx=5)
+        e_thres.bind("<Return>", self.on_random_simple_threshold_change)
+        e_thres.bind("<FocusOut>", self.on_random_simple_threshold_change)
+        self.lbl_match_spread_sub = ttk.Label(f_thres, text="BPM spread to match", style="Sub.TLabel")
+        self.lbl_match_spread_sub.pack(side="left")
+
+        # Steps
+        self.lbl_match_steps = ttk.Label(self.random_settings_frame, text="Match Steps", style="CardHeader.TLabel")
+        self.lbl_match_steps.pack(anchor="w", padx=5, pady=(5,0))
+        f_steps = ttk.Frame(self.random_settings_frame, style="Card.TFrame")
+        f_steps.pack(fill="x", padx=5, pady=3)
+        self.random_simple_steps_var = tk.StringVar(value="20")
+        e_steps = ttk.Entry(f_steps, textvariable=self.random_simple_steps_var, width=5)
+        e_steps.pack(side="left", padx=5)
+        e_steps.bind("<Return>", self.on_random_simple_steps_change)
+        e_steps.bind("<FocusOut>", self.on_random_simple_steps_change)
+        self.lbl_match_steps_sub = ttk.Label(f_steps, text="consecutive steps to match", style="Sub.TLabel")
+        self.lbl_match_steps_sub.pack(side="left")
+
+        # Timeout
+        self.lbl_match_timeout = ttk.Label(self.random_settings_frame, text="Match Timeout", style="CardHeader.TLabel")
+        self.lbl_match_timeout.pack(anchor="w", padx=5, pady=(5,0))
+        f_timeout = ttk.Frame(self.random_settings_frame, style="Card.TFrame")
+        f_timeout.pack(fill="x", padx=5, pady=3)
+        self.random_simple_timeout_var = tk.StringVar(value="30.0")
+        e_timeout = ttk.Entry(f_timeout, textvariable=self.random_simple_timeout_var, width=5)
+        e_timeout.pack(side="left", padx=5)
+        e_timeout.bind("<Return>", self.on_random_simple_timeout_change)
+        e_timeout.bind("<FocusOut>", self.on_random_simple_timeout_change)
+        self.lbl_match_timeout_sub = ttk.Label(f_timeout, text="seconds until fallback", style="Sub.TLabel")
+        self.lbl_match_timeout_sub.pack(side="left")
+
+        # HYBRID SETTINGS
+        self.hybrid_settings_frame = ttk.Frame(self.dynamic_settings_container, style="Card.TFrame")
+        self.hybrid_settings_frame.pack(fill="x", pady=5)
+        
+        ttk.Label(self.hybrid_settings_frame, text="Lock Steps", style="CardHeader.TLabel").pack(anchor="w")
+        lock_row = ttk.Frame(self.hybrid_settings_frame, style="Card.TFrame")
+        lock_row.pack(fill="x", pady=3)
+        
+        self.hybrid_lock_var = tk.IntVar(value=5)
+        self.hybrid_lock_entry = ttk.Entry(lock_row, textvariable=self.hybrid_lock_var, width=5)
+        self.hybrid_lock_entry.pack(side="left", padx=5)
+        self.hybrid_lock_entry.bind("<Return>", self.on_hybrid_lock_change)
+        self.hybrid_lock_entry.bind("<FocusOut>", self.on_hybrid_lock_change)
+        ttk.Label(lock_row, text="steps to lock", style="Sub.TLabel").pack(side="left")
+        
+        ttk.Label(self.hybrid_settings_frame, text="Unlock Time", style="CardHeader.TLabel").pack(anchor="w", pady=(8,0))
+        unlock_row = ttk.Frame(self.hybrid_settings_frame, style="Card.TFrame")
+        unlock_row.pack(fill="x", pady=3)
+        
+        self.hybrid_unlock_var = tk.DoubleVar(value=1.5)
+        self.hybrid_unlock_entry = ttk.Entry(unlock_row, textvariable=self.hybrid_unlock_var, width=5)
+        self.hybrid_unlock_entry.pack(side="left", padx=5)
+        self.hybrid_unlock_entry.bind("<Return>", self.on_hybrid_unlock_change)
+        self.hybrid_unlock_entry.bind("<FocusOut>", self.on_hybrid_unlock_change)
+        ttk.Label(unlock_row, text="seconds to unlock", style="Sub.TLabel").pack(side="left")
+
+        # Stability Threshold
+        ttk.Label(self.hybrid_settings_frame, text="Stability Threshold", style="CardHeader.TLabel").pack(anchor="w", pady=(8,0))
+        stab_row = ttk.Frame(self.hybrid_settings_frame, style="Card.TFrame")
+        stab_row.pack(fill="x", pady=3)
+        
+        self.hybrid_stability_var = tk.DoubleVar(value=3.0)
+        self.hybrid_stability_entry = ttk.Entry(stab_row, textvariable=self.hybrid_stability_var, width=5)
+        self.hybrid_stability_entry.pack(side="left", padx=5)
+        self.hybrid_stability_entry.bind("<Return>", self.on_hybrid_stability_change)
+        self.hybrid_stability_entry.bind("<FocusOut>", self.on_hybrid_stability_change)
+        ttk.Label(stab_row, text="BPM spread to lock", style="Sub.TLabel").pack(side="left")
+
+        # Unlock Threshold
+        ttk.Label(self.hybrid_settings_frame, text="Unlock Threshold", style="CardHeader.TLabel").pack(anchor="w", pady=(8,0))
+        unlock_thres_row = ttk.Frame(self.hybrid_settings_frame, style="Card.TFrame")
+        unlock_thres_row.pack(fill="x", pady=3)
+        
+        self.hybrid_unlock_thres_var = tk.DoubleVar(value=15.0)
+        self.hybrid_unlock_thres_entry = ttk.Entry(unlock_thres_row, textvariable=self.hybrid_unlock_thres_var, width=5)
+        self.hybrid_unlock_thres_entry.pack(side="left", padx=5)
+        self.hybrid_unlock_thres_entry.bind("<Return>", self.on_hybrid_unlock_thres_change)
+        self.hybrid_unlock_thres_entry.bind("<FocusOut>", self.on_hybrid_unlock_thres_change)
+        ttk.Label(unlock_thres_row, text="BPM deviation to unlock", style="Sub.TLabel").pack(side="left")
 
         # MANUAL BPM
         self.manual_bpm_frame = ttk.Frame(self.dynamic_settings_container, style="Card.TFrame")
@@ -583,27 +693,135 @@ class GuiApp:
         manual_state = "normal" if m == "manual" else "disabled"
         self._set_frame_state(self.manual_bpm_frame, manual_state)
         
+        # 3. Hybrid Mode State
+        hybrid_state = "normal" if m == "hybrid" else "disabled"
+        self._set_frame_state(self.hybrid_settings_frame, hybrid_state)
+        
+        # 3. Switch Mode on Backend
+        if not self.session_thread:
+            return
+            
         if m == "manual":
-            if self.session_thread: self.session_thread.set_manual_mode(True)
+            self.session_thread.set_manual_mode(True)
             # Apply current BPM immediately if switching to manual
             val = self.manual_bpm_var.get()
             self.on_bpm_slider_change(val)
             
         elif m == "random":
-             if self.session_thread: self.session_thread.set_manual_mode(False)
-             # Apply random span & gamify
-             val = self.random_span_var.get()
-             if self.session_thread: 
-                 self.session_thread.update_random_span(val)
-                 self.session_thread.update_random_gamified(self.gamify_var.get())
+            self.session_thread.set_random_mode(True)
+            # Apply random span & gamify
+            val = self.random_span_var.get()
+            self.session_thread.update_random_span(val)
+            self.session_thread.update_random_gamified(self.gamify_var.get())
+            # Sync simple mode settings
+            self.session_thread.update_random_simple_threshold(self.random_simple_threshold_var.get())
+            self.session_thread.update_random_simple_steps(self.random_simple_steps_var.get())
+            self.session_thread.update_random_simple_timeout(self.random_simple_timeout_var.get())
         
-        else:
-             if self.session_thread: self.session_thread.set_manual_mode(False)
+        elif m == "hybrid":
+            self.session_thread.set_hybrid_mode(True)
+            # Apply current hybrid settings from GUI
+            self.session_thread.update_hybrid_lock_steps(self.hybrid_lock_var.get())
+            self.session_thread.update_hybrid_unlock_time(self.hybrid_unlock_var.get())
+            self.session_thread.update_hybrid_stability_threshold(self.hybrid_stability_var.get())
+            self.session_thread.update_hybrid_unlock_threshold(self.hybrid_unlock_thres_var.get())
+            
+        else: # dynamic
+            self.session_thread.set_dynamic_mode(True)
              
     def on_gamify_toggle(self):
         """Called when gamify checkbox is toggled."""
-        if self.mode_var.get() == "random" and self.session_thread:
-            self.session_thread.update_random_gamified(self.gamify_var.get())
+        is_gamified = self.gamify_var.get()
+        if is_gamified:
+            self.lbl_match_steps.configure(text="Match Hold Time")
+            self.lbl_match_steps_sub.configure(text="seconds to hold match")
+        else:
+            self.lbl_match_steps.configure(text="Match Steps")
+            self.lbl_match_steps_sub.configure(text="consecutive steps to match")
+            
+        if self.session_thread:
+            self.session_thread.update_random_gamified(is_gamified)
+            # Send current values to ensure the backend uses the right mapping immediately
+            self.session_thread.update_random_simple_threshold(self.random_simple_threshold_var.get())
+            self.session_thread.update_random_simple_steps(self.random_simple_steps_var.get())
+            self.session_thread.update_random_simple_timeout(self.random_simple_timeout_var.get())
+
+    def on_random_simple_threshold_change(self, event=None):
+        """Called when random simple threshold is changed."""
+        try:
+            bpm = float(self.random_simple_threshold_var.get())
+            bpm = max(1.0, min(20.0, bpm))  # Clamp
+            self.random_simple_threshold_var.set(bpm)
+            if self.session_thread:
+                self.session_thread.update_random_simple_threshold(bpm)
+        except ValueError:
+            self.random_simple_threshold_var.set("5.0")
+
+    def on_random_simple_steps_change(self, event=None):
+        """Called when random simple steps is changed."""
+        try:
+            steps = int(self.random_simple_steps_var.get())
+            steps = max(5, min(100, steps))  # Clamp
+            self.random_simple_steps_var.set(steps)
+            if self.session_thread:
+                self.session_thread.update_random_simple_steps(steps)
+        except ValueError:
+            self.random_simple_steps_var.set("20")
+
+    def on_random_simple_timeout_change(self, event=None):
+        """Called when random simple timeout is changed."""
+        try:
+            sec = float(self.random_simple_timeout_var.get())
+            sec = max(5.0, min(300.0, sec))  # Clamp
+            self.random_simple_timeout_var.set(sec)
+            if self.session_thread:
+                self.session_thread.update_random_simple_timeout(sec)
+        except ValueError:
+            self.random_simple_timeout_var.set("30.0")
+
+    def on_hybrid_lock_change(self, event=None):
+        """Called when hybrid lock steps is changed."""
+        try:
+            steps = int(self.hybrid_lock_var.get())
+            steps = max(2, min(20, steps))  # Clamp
+            self.hybrid_lock_var.set(steps)
+            if self.session_thread:
+                self.session_thread.update_hybrid_lock_steps(steps)
+        except ValueError:
+            self.hybrid_lock_var.set(5)
+
+    def on_hybrid_unlock_change(self, event=None):
+        """Called when hybrid unlock time is changed."""
+        try:
+            seconds = float(self.hybrid_unlock_var.get())
+            seconds = max(0.5, min(5.0, seconds))  # Clamp
+            self.hybrid_unlock_var.set(seconds)
+            if self.session_thread:
+                self.session_thread.update_hybrid_unlock_time(seconds)
+        except ValueError:
+            self.hybrid_unlock_var.set(1.5)
+
+    def on_hybrid_stability_change(self, event=None):
+        """Called when hybrid stability threshold is changed."""
+        try:
+            bpm = float(self.hybrid_stability_var.get())
+            bpm = max(1.0, min(10.0, bpm))  # Clamp
+            self.hybrid_stability_var.set(bpm)
+            if self.session_thread:
+                self.session_thread.update_hybrid_stability_threshold(bpm)
+        except ValueError:
+            self.hybrid_stability_var.set(3.0)
+
+    def on_hybrid_unlock_thres_change(self, event=None):
+        """Called when hybrid unlock threshold is changed."""
+        try:
+            bpm = float(self.hybrid_unlock_thres_var.get())
+            bpm = max(5.0, min(50.0, bpm))  # Clamp
+            self.hybrid_unlock_thres_var.set(bpm)
+            if self.session_thread:
+                self.session_thread.update_hybrid_unlock_threshold(bpm)
+        except ValueError:
+            self.hybrid_unlock_thres_var.set(15.0)
 
     def start_session(self):
         """Action for the 'START SESSION' button."""
@@ -687,12 +905,16 @@ class GuiApp:
             hybrid_mode=(self.mode_var.get() == "hybrid"),
             random_mode=(self.mode_var.get() == "random"),
             random_span=self.random_span_var.get(),
+            random_gamified=self.gamify_var.get(),
+            random_simple_threshold=self.random_simple_threshold_var.get(),
+            random_simple_steps=self.random_simple_steps_var.get(),
+            random_simple_timeout=self.random_simple_timeout_var.get(),
+            hybrid_lock_steps=self.hybrid_lock_var.get(),
+            hybrid_unlock_time=self.hybrid_unlock_var.get(),
+            hybrid_stability_threshold=self.hybrid_stability_var.get(),
+            hybrid_unlock_threshold=self.hybrid_unlock_thres_var.get(),
             gui_sync_callback=self.on_gui_sync,
         )
-        
-        # If Random Mode is active, ensuring Gamify State is synced
-        if self.mode_var.get() == "random":
-             self.session_thread.update_random_gamified(self.gamify_var.get())
         
         # Update UI state
         self.is_running = True

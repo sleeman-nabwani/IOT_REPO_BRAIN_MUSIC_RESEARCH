@@ -12,7 +12,9 @@ class SubprocessManager:
     - Writes commands to its STDIN.
     - Reads logs from its STDOUT.
     """
-    def __init__(self, midi_path, serial_port, manual_mode, manual_bpm, smoothing_window, stride, log_callback, session_dir_callback, data_callback=None, gui_sync_callback=None, session_name=None, alpha_up=None, alpha_down=None, hybrid_mode=False, random_mode=False, random_span=None):
+    def __init__(self, midi_path, serial_port, manual_mode, manual_bpm, smoothing_window, stride, log_callback, session_dir_callback, data_callback=None, gui_sync_callback=None, session_name=None, alpha_up=None, alpha_down=None, hybrid_mode=False, random_mode=False, random_span=None, 
+                 hybrid_lock_steps=None, hybrid_unlock_time=None, hybrid_stability_threshold=None, hybrid_unlock_threshold=None, random_gamified=None,
+                 random_simple_threshold=None, random_simple_steps=None, random_simple_timeout=None):
         self.log_callback = log_callback
         self.session_dir_callback = session_dir_callback
         self.data_callback = data_callback
@@ -49,11 +51,28 @@ class SubprocessManager:
         
         if hybrid_mode:
             cmd.append("--hybrid")
+            if hybrid_lock_steps is not None:
+                cmd.extend(["--hybrid-lock-steps", str(hybrid_lock_steps)])
+            if hybrid_unlock_time is not None:
+                cmd.extend(["--hybrid-unlock-time", str(hybrid_unlock_time)])
+            if hybrid_stability_threshold is not None:
+                cmd.extend(["--hybrid-stability-threshold", str(hybrid_stability_threshold)])
+            if hybrid_unlock_threshold is not None:
+                cmd.extend(["--hybrid-unlock-threshold", str(hybrid_unlock_threshold)])
 
         if random_mode:
             cmd.append("--random")
             if random_span:
                 cmd.extend(["--random-span", str(random_span)])
+            if random_gamified is not None:
+                val = 1 if random_gamified else 0
+                cmd.extend(["--random-gamified", str(val)])
+            if random_simple_threshold is not None:
+                cmd.extend(["--random-simple-threshold", str(random_simple_threshold)])
+            if random_simple_steps is not None:
+                cmd.extend(["--random-simple-steps", str(random_simple_steps)])
+            if random_simple_timeout is not None:
+                cmd.extend(["--random-simple-timeout", str(random_simple_timeout)])
         
         # Launch Process
         try:
@@ -158,9 +177,16 @@ class SubprocessManager:
         self.send_command(f"SET_MANUAL_BPM:{bpm}")
 
     def set_manual_mode(self, enabled):
-        # Main doesn't support switching mode at runtime via STDIN yet, 
-        # but we can implement it if needed. For now, just log.
-        pass
+        self.send_command("SET_MODE:manual")
+
+    def set_random_mode(self, enabled):
+        self.send_command("SET_MODE:random")
+
+    def set_hybrid_mode(self, enabled):
+        self.send_command("SET_MODE:hybrid")
+
+    def set_dynamic_mode(self, enabled):
+        self.send_command("SET_MODE:dynamic")
 
     def update_smoothing_alpha_up(self, alpha):
         self.send_command(f"SET_ALPHA_UP:{alpha}")
@@ -180,6 +206,27 @@ class SubprocessManager:
     def update_random_gamified(self, enabled: bool):
         val = 1 if enabled else 0
         self.send_command(f"SET_RANDOM_GAMIFIED:{val}")
+
+    def update_random_simple_threshold(self, threshold: float):
+        self.send_command(f"SET_RANDOM_SIMPLE_THRESHOLD:{threshold}")
+
+    def update_random_simple_steps(self, steps: int):
+        self.send_command(f"SET_RANDOM_SIMPLE_STEPS:{steps}")
+
+    def update_random_simple_timeout(self, seconds: float):
+        self.send_command(f"SET_RANDOM_SIMPLE_TIMEOUT:{seconds}")
+
+    def update_hybrid_lock_steps(self, steps: int):
+        self.send_command(f"SET_HYBRID_LOCK_STEPS:{steps}")
+
+    def update_hybrid_unlock_time(self, seconds: float):
+        self.send_command(f"SET_HYBRID_UNLOCK_TIME:{seconds}")
+
+    def update_hybrid_stability_threshold(self, bpm: float):
+        self.send_command(f"SET_HYBRID_STABILITY_THRESHOLD:{bpm}")
+
+    def update_hybrid_unlock_threshold(self, bpm: float):
+        self.send_command(f"SET_HYBRID_UNLOCK_THRESHOLD:{bpm}")
 
     def stop(self):
         self.running = False

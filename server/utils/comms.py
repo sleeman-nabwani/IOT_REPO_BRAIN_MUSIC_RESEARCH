@@ -104,7 +104,7 @@ def handle_engine_command(cmd, ser, logger, bpm_estimation, player):
                     bpm_estimation.set_smoothing_alpha_down(float(val))
                     logger.log(f"Config: Alpha DOWN set to {val}")
                 elif key == "SET_MANUAL_BPM":
-                    player.set_BPM(float(val))
+                    bpm_estimation.set_manual_bpm(float(val))
                     logger.log(f"Config: Manual BPM set to {val}")
                 elif key == "SET_WINDOW":
                     send_config_command(ser, logger, "SET_WINDOW", int(val), "steps window", "ACK,WINDOW")
@@ -116,6 +116,34 @@ def handle_engine_command(cmd, ser, logger, bpm_estimation, player):
                 elif key == "SET_RANDOM_GAMIFIED":
                      if hasattr(bpm_estimation, 'set_random_gamified'):
                          bpm_estimation.set_random_gamified(int(val) == 1)
+                elif key == "SET_RANDOM_SIMPLE_THRESHOLD":
+                     if hasattr(bpm_estimation, 'set_random_simple_threshold'):
+                         bpm_estimation.set_random_simple_threshold(float(val))
+                elif key == "SET_RANDOM_SIMPLE_STEPS":
+                     if hasattr(bpm_estimation, 'set_random_simple_steps'):
+                         bpm_estimation.set_random_simple_steps(int(val))
+                elif key == "SET_RANDOM_SIMPLE_TIMEOUT":
+                     if hasattr(bpm_estimation, 'set_random_simple_timeout'):
+                         bpm_estimation.set_random_simple_timeout(float(val))
+                elif key == "SET_MODE":
+                    mode = val.lower()
+                    if mode == "manual":
+                        bpm_estimation.set_manual_mode(True)
+                    elif mode == "random":
+                        bpm_estimation.set_random_mode(True)
+                    elif mode == "hybrid":
+                        bpm_estimation.set_hybrid_mode(True)
+                    elif mode == "dynamic":
+                        bpm_estimation.set_dynamic_mode(True)
+                    logger.log(f"Mode switched to: {mode}")
+                elif key == "SET_HYBRID_LOCK_STEPS":
+                    bpm_estimation.set_hybrid_lock_steps(int(val))
+                elif key == "SET_HYBRID_UNLOCK_TIME":
+                    bpm_estimation.set_hybrid_unlock_time(float(val))
+                elif key == "SET_HYBRID_STABILITY_THRESHOLD":
+                    bpm_estimation.set_hybrid_stability_threshold(float(val))
+                elif key == "SET_HYBRID_UNLOCK_THRESHOLD":
+                    bpm_estimation.set_hybrid_unlock_threshold(float(val))
             except ValueError:
                 logger.log(f"Invalid command format: {cmd}")
         elif cmd == "QUIT":

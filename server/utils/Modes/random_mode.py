@@ -2,7 +2,8 @@ import random
 from utils.Modes.base_mode import BaseMode
 
 class RandomMode(BaseMode):
-    def __init__(self, context):
+    def __init__(self, context, span: float = 0.20, gamified: bool = False, 
+                 simple_threshold: float = 5.0, simple_steps: int = 20, simple_timeout: float = 30.0):
         super().__init__(context)
         # Game State
         self.game_target = None
@@ -12,9 +13,24 @@ class RandomMode(BaseMode):
         # Simple Mode State
         self.matched_step_counter = 0
 
-        # Configuration
-        self.span = 0.20 # Default 20%
-        self.gamified = True # Default to Game Mode
+        # Configuration (from init params, which come from GUI)
+        self.span = span
+        self.gamified = gamified
+        self.simple_threshold = simple_threshold
+        self.simple_steps = simple_steps
+        self.simple_timeout = simple_timeout
+
+    def set_simple_threshold(self, threshold):
+        self.simple_threshold = float(threshold)
+        self.logger.log(f"RANDOM: Simple threshold set to {self.simple_threshold} BPM")
+
+    def set_simple_steps(self, steps):
+        self.simple_steps = int(steps)
+        self.logger.log(f"RANDOM: Simple steps set to {self.simple_steps}")
+
+    def set_simple_timeout(self, seconds):
+        self.simple_timeout = float(seconds)
+        self.logger.log(f"RANDOM: Simple timeout set to {self.simple_timeout}s")
 
     def set_span(self, span):
         self.span = span
@@ -35,72 +51,68 @@ class RandomMode(BaseMode):
         self.target_assigned_time = None
         self.matched_step_counter = 0
 
-    def on_step(self, bpm):
+    def on_step(self, bpm, now_ts):
         """Called on every step."""
         if self.gamified or self.game_target is None:
              return
-             
-        # Simple Mode Step Logic
-        THRESHOLD = 5.0
-        STEPS_TO_HOLD = 20
         
         diff = abs(bpm - self.game_target)
-        if diff < THRESHOLD:
+        if diff < self.simple_threshold:
             self.matched_step_counter += 1
             if self.matched_step_counter % 5 == 0: 
-                 self.logger.log(f"SIMPLE: Matched {self.matched_step_counter}/{STEPS_TO_HOLD} steps...")
+                 self.logger.log(f"SIMPLE: Matched {self.matched_step_counter}/{self.simple_steps} steps...")
                  
-            if self.matched_step_counter >= STEPS_TO_HOLD:
-                 self.logger.log(f"SIMPLE: Completed {STEPS_TO_HOLD} steps! Next target.")
-                 self._pick_new_target(self.context.last_update_time)
+            if self.matched_step_counter >= self.simple_steps:
+                 self.logger.log(f"SIMPLE: Completed {self.simple_steps} steps! Next target.")
+                 # Use passed timestamp
+                 self._pick_new_target(now_ts)
                  self.matched_step_counter = 0
         else:
-            # If they lose sync, do we reset? 
-            # User said "wait for user to match", usually implies cumulative or continuous.
-            # I'll reset to require *continuous* matching for stability.
             if self.matched_step_counter > 0:
                  self.logger.log("SIMPLE: Lost match. Resetting counter.")
             self.matched_step_counter = 0
 
-    def handle_step(self, now_ts, current_bpm):
+    def handle_step(self, now_ts, current_bpm, dt):
         """
         Orchestrates Random Mode (Gamified or Simple).
+        Returns (target, smoothed_next).
         """
         # 1. Initialization
         if self.game_target is None:
             self._pick_new_target(now_ts)
-            return self.game_target
+            return self.game_target, self._smooth_towards(current_bpm, self.game_target, dt)
             
         # --- SIMPLE MODE ---
         if not self.gamified:
-             # Logic is handled in on_step()
-             # We just return the target
-             return self.game_target
+             # Timeout Check (Fallback if user can't match pace)
+             if self.target_assigned_time and (now_ts - self.target_assigned_time > self.simple_timeout):
+                 self.logger.log(f"SIMPLE: Timeout ({self.simple_timeout}s)! Next target.")
+                 self._pick_new_target(now_ts)
+                 self.matched_step_counter = 0
+             
+             # Logic is also handled in on_step()
+             return self.game_target, self._smooth_towards(current_bpm, self.game_target, dt)
 
         # --- GAMIFIED MODE ---
-        TIMEOUT_DURATION = 20.0
-        HOLD_DURATION = 10.0
-        THRESHOLD = 5.0
-        
         # 2. Timeout Check
-        if self.target_assigned_time and (now_ts - self.target_assigned_time > TIMEOUT_DURATION):
-             self.logger.log(f"GAME: Timeout ({TIMEOUT_DURATION}s)! Skipping...")
+        if self.target_assigned_time and (now_ts - self.target_assigned_time > self.simple_timeout):
+             self.logger.log(f"GAME: Timeout ({self.simple_timeout}s)! Skipping...")
              self._pick_new_target(now_ts)
-             return self.game_target
+             return self.game_target, self._smooth_towards(current_bpm, self.game_target, dt)
 
         # 3. Match & Hold Check
         diff = abs(current_bpm - self.game_target)
 
         # Matched?
-        if diff < THRESHOLD:
+        if diff < self.simple_threshold:
             if self.match_start_time is None:
                 self.match_start_time = now_ts
                 self.logger.log("GAME: Matched! Hold it...")
             
             # Held long enough?
             held_duration = now_ts - self.match_start_time
-            if held_duration > HOLD_DURATION:
-                self.logger.log(f"GAME: Success! Held for {HOLD_DURATION}s.")
+            if held_duration > self.simple_steps:
+                self.logger.log(f"GAME: Success! Held for {self.simple_steps}s.")
                 self._pick_new_target(now_ts)
         else:
             # Lost the match
@@ -108,7 +120,7 @@ class RandomMode(BaseMode):
                 self.logger.log("GAME: Lost match! Try again.")
                 self.match_start_time = None
         
-        return self.game_target
+        return self.game_target, self._smooth_towards(current_bpm, self.game_target, dt)
 
     def _pick_new_target(self, now_ts):
         """Generates a new random target BPM."""

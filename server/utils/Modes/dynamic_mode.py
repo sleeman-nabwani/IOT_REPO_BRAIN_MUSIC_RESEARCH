@@ -1,67 +1,40 @@
-import statistics
 from utils.Modes.base_mode import BaseMode
 
 class DynamicMode(BaseMode):
     def __init__(self, context):
         super().__init__(context)
-        self.hybrid_mode = False # "Cruise Control"
-        
-        # State
-        self.locked_bpm = None
-        self.start_hold_time = None
-        self.stability_buffer = []  # To detect stable walking for locking
-        self.unlock_buffer = []     # To detect change for unlocking
-        self.unlock_start_time = None
+        self.last_step_time = 0.0
+        self.last_step_bpm = context.player.walkingBPM  # Start at song BPM
 
-    def set_hybrid(self, enabled: bool):
-        self.hybrid_mode = enabled
-        if not enabled:
-            self.locked_bpm = None
-            self.stability_buffer.clear()
-            self.unlock_buffer.clear()
+    def on_step(self, bpm, now_ts):
+        """Record detected walking BPM and timestamp."""
+        self.last_step_time = now_ts
+        self.last_step_bpm = bpm  # Store the detected BPM
 
-    def handle_step(self, now_ts, current_bpm):
+    def handle_step(self, now_ts, current_bpm, dt):
         """
-        Returns the target BPM.
-        If Hybrid and Locked, returns lock.
-        Else returns current_bpm (smoothed by context).
+        Returns (target, smoothed_next)
         """
-        if not self.hybrid_mode:
-            return current_bpm
+        # 1. Base Target = Last detected walking BPM
+        target = self.last_step_bpm
         
-        # --- Hybrid / Cruise Control Logic ---
-        
-        # 1. If Locked
-        if self.locked_bpm is not None:
-            # Check for Unlock condition (significant deviation)
-            diff = abs(current_bpm - self.locked_bpm)
-            UNLOCK_THRESHOLD = 15.0 # BPM
-            
-            if diff > UNLOCK_THRESHOLD:
-                if self.unlock_start_time is None:
-                    self.unlock_start_time = now_ts
-                
-                # If deviation persists for 1.5s
-                if (now_ts - self.unlock_start_time) > 1.5:
-                    self.logger.log(f"HYBRID: Unlocking (Diff {diff:.1f})")
-                    self.locked_bpm = None
-                    self.unlock_start_time = None
-                    return current_bpm # Return to dynamic
-            else:
-                 self.unlock_start_time = None
-                 
-            return self.locked_bpm
+        # 2. Decay Logic (Safety) - If no steps, slow down
+        if self.last_step_time > 0:
+            interval = now_ts - self.last_step_time
+            if interval > 0:
+                decay_limit = 60.0 / interval
+                if decay_limit < target:
+                    target = decay_limit
 
-        # 2. If Not Locked (Dynamic)
-        # Check for Stability to Lock
-        self.stability_buffer.append(current_bpm)
-        if len(self.stability_buffer) > 5: self.stability_buffer.pop(0)
-
-        if len(self.stability_buffer) == 5:
-            delta = max(self.stability_buffer) - min(self.stability_buffer)
-            if delta < 3.0: # Stable within 3 BPM
-                 self.locked_bpm = statistics.mean(self.stability_buffer)
-                 self.logger.log(f"HYBRID: Locked at {self.locked_bpm:.1f} BPM")
-                 return self.locked_bpm
+        # 3. Smoothing with Boost
+        alpha_up = getattr(self.context, 'smoothing_alpha_up', 0.025)
         
-        return current_bpm
+        # Boost logic - accelerate faster when far from target
+        bpm_diff = target - current_bpm
+        if bpm_diff > 5.0:
+            boost = 1.0 + (bpm_diff - 5.0) * 0.1
+            alpha_up *= min(boost, 4.0)
+
+        smoothed = self._smooth_towards(current_bpm, target, dt, alpha_up=alpha_up)
+        
+        return target, smoothed

@@ -9,10 +9,10 @@ class BaseMode(ABC):
         self.logger = context.logger
 
     @abstractmethod
-    def handle_step(self, now_ts, current_bpm):
+    def handle_step(self, now_ts, current_bpm, dt):
         """
         Called on every step computation.
-        Should return the target BPM to set, or None if no change.
+        Should return (target_bpm, next_instant_bpm).
         """
         pass
 
@@ -24,6 +24,32 @@ class BaseMode(ABC):
         """Called when leaving this mode."""
         pass
 
-    def on_step(self, bpm):
+    def on_step(self, bpm, now_ts):
         """Called when a step is detected."""
         pass
+
+    def _smooth_towards(self, current_bpm, target_bpm, dt, alpha_up=None, alpha_down=None):
+        """Standard smoothing logic utilized by all modes."""
+        diff = abs(target_bpm - current_bpm)
+        if diff < 0.1:
+            return target_bpm
+
+        # Resolve Alphas
+        if alpha_up is None:
+            alpha_up = getattr(self.context, 'smoothing_alpha_up', 0.025)
+        if alpha_down is None:
+            alpha_down = getattr(self.context, 'smoothing_alpha_down', 1.0)
+
+        step = 0.0
+        if target_bpm > current_bpm:
+            # Acceleration
+            step = (target_bpm - current_bpm) * (alpha_up * 25.0) * dt
+        else:
+            # Deceleration
+            step = (target_bpm - current_bpm) * (alpha_down * 25.0) * dt
+        
+        # Clamp step to not overshoot
+        if abs(step) > diff:
+            return target_bpm
+        
+        return current_bpm + step
