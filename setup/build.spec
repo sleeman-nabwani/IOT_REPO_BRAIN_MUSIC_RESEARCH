@@ -1,15 +1,27 @@
 # -*- mode: python ; coding: utf-8 -*-
 """
 PyInstaller build specification for Brain Music Sync.
-This compiles the Python application into a Windows executable.
+This compiles the Python application into an executable for Windows/Linux/macOS.
 """
 
 import os
+import sys
 
 # Since this spec is in setup/, we need to reference the project root
 project_root = os.path.dirname(SPECPATH)
 
 block_cipher = None
+
+# Determine which icon to use based on platform
+icon_path = None
+if sys.platform == 'darwin':  # macOS
+    icon_file = os.path.join(SPECPATH, 'App.icns')
+    if os.path.exists(icon_file):
+        icon_path = icon_file
+elif sys.platform == 'win32':  # Windows
+    icon_file = os.path.join(SPECPATH, 'App.ico')
+    if os.path.exists(icon_file):
+        icon_path = icon_file
 
 # Analysis: Collect all dependencies
 a = Analysis(
@@ -22,6 +34,12 @@ a = Analysis(
         (os.path.join(project_root, 'research/LightGBM/results/models/lgbm_model.joblib'), 'research/LightGBM/results/models'),
     ],
     hiddenimports=[
+        # Tkinter support (critical for macOS)
+        'tkinter',
+        'tkinter.ttk',
+        'tkinter.filedialog',
+        'tkinter.messagebox',
+        '_tkinter',
         # Scikit-learn internals (required for LightGBM/Ridge)
         'sklearn.utils._cython_blas',
         'sklearn.neighbors.typedefs',
@@ -33,6 +51,7 @@ a = Analysis(
         'lightgbm.sklearn',
         'optuna',
         'optuna.storages',
+        'joblib',
         # MIDI support
         'mido',
         'mido.backends',
@@ -44,6 +63,8 @@ a = Analysis(
         'matplotlib',
         'matplotlib.backends',
         'matplotlib.backends.backend_tkagg',
+        'PIL',
+        'PIL._tkinter_finder',
         # Serial communication
         'serial',
         'serial.tools',
@@ -89,7 +110,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=os.path.join(SPECPATH, 'App.ico'),  # Custom app icon (same dir as spec)
+    icon=icon_path,  # Custom app icon (platform-specific)
 )
 
 coll = COLLECT(
@@ -102,4 +123,21 @@ coll = COLLECT(
     upx_exclude=[],
     name='BrainMusicSync',
 )
+
+# macOS App Bundle (optional, creates .app structure)
+if sys.platform == 'darwin':
+    app = BUNDLE(
+        coll,
+        name='BrainMusicSync.app',
+        icon=icon_path,
+        bundle_identifier='com.brainmusicsync.app',
+        info_plist={
+            'NSPrincipalClass': 'NSApplication',
+            'NSHighResolutionCapable': 'True',
+            'CFBundleName': 'Brain Music Sync',
+            'CFBundleDisplayName': 'Brain Music Sync',
+            'CFBundleVersion': '1.0.0',
+            'CFBundleShortVersionString': '1.0.0',
+        },
+    )
 

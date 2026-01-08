@@ -99,13 +99,38 @@ sudo pacman -S python python-pip tk
 ```
 
 **macOS:**
+
+> **⚠️ IMPORTANT: Homebrew Required for macOS**
+> 
+> macOS users need [Homebrew](https://brew.sh) to ensure all dependencies are available. The build script will **automatically install tkinter** if you're using Homebrew Python, but Homebrew itself must be installed first.
+
+**Why Homebrew is Required:**
+- **tkinter** (GUI library) is **not included** with Homebrew's Python by default
+- **tkinter cannot be installed via pip** - it's a system package
+- The build script detects Homebrew Python and automatically installs `python-tk` for you
+- This ensures the GUI application works correctly
+
+**Installation:**
 ```bash
-# Install Homebrew (if not already installed)
+# 1. Install Homebrew (if not already installed)
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
 
-# Install Python
-brew install python python-tk
+# 2. Install Python (the build script will auto-install python-tk when needed)
+brew install python
+
+# 3. Run the build - tkinter will be installed automatically!
+cd setup/Linux_Mac
+./build_app.sh
 ```
+
+**Alternative (Without Homebrew):**
+If you prefer not to use Homebrew, install Python from [python.org](https://www.python.org/downloads/) which includes tkinter by default.
+
+**What the Build Script Does:**
+1. ✅ Detects if you're using Homebrew Python
+2. ✅ Checks if tkinter is available
+3. ✅ Automatically runs `brew install python-tk@<version>` if needed
+4. ✅ Verifies installation before proceeding
 
 #### **Distribution:**
 
@@ -252,24 +277,48 @@ chmod +x dist/BrainMusicSync/BrainMusicSync
 
 ### 🍎 **macOS Issues**
 
+#### **"command not found: brew"**
+Homebrew is not installed. Install it:
+```bash
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+```
+
+Then install Python:
+```bash
+brew install python
+```
+
 #### **"command not found: python3"**
 ```bash
 brew install python
 ```
 
-#### **"tkinter not found"**
+Or download from [python.org](https://www.python.org/downloads/) (includes tkinter by default).
+
+#### **"tkinter not found" (Manual Fix)**
+The build script should install this automatically for Homebrew Python, but if it fails:
+
 ```bash
-brew install python-tk
+# Find your Python version
+python3 --version
+
+# Install python-tk for your version (e.g., 3.14, 3.13, etc.)
+brew install python-tk@3.14
 ```
+
+**Why this happens:**
+- Homebrew's Python doesn't include tkinter by default
+- tkinter is required for the GUI interface
+- The build script detects this and auto-installit, but you can install manually if needed
 
 #### **Gatekeeper blocks app from running**
 ```bash
 # Remove quarantine attribute
-xattr -d com.apple.quarantine dist/BrainMusicSync/BrainMusicSync
+xattr -d com.apple.quarantine dist/BrainMusicSync.app/Contents/MacOS/BrainMusicSync
 ```
 
 Or:
-1. Right-click on `BrainMusicSync`
+1. Right-click on `BrainMusicSync.app`
 2. Select "Open"
 3. Click "Open" in the dialog (first time only)
 
