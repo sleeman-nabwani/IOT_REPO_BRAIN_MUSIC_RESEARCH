@@ -72,12 +72,52 @@ if ! command -v python3 &> /dev/null; then
     exit 1
 fi
 
-echo "[Step 1/6] Python found"
+echo "[Step 1/7] Python found"
 python3 --version
 echo ""
 
+# macOS-specific: Check Homebrew requirement
+if [[ "$OSTYPE" == "darwin"* ]]; then
+    echo "[Step 2/7] Checking macOS requirements..."
+    
+    # Check if Homebrew is installed
+    if ! command -v brew &> /dev/null; then
+        echo ""
+        echo "========================================"
+        echo "  ⚠️  HOMEBREW REQUIRED FOR macOS"
+        echo "========================================"
+        echo ""
+        echo "This application requires Homebrew to be installed on macOS."
+        echo ""
+        echo "Why Homebrew is needed:"
+        echo "  • Installs critical dependencies (like tkinter for GUI)"
+        echo "  • Ensures all Python packages work correctly"
+        echo "  • Standard package manager for macOS development"
+        echo ""
+        echo "To install Homebrew, run this command:"
+        echo ""
+        echo '  /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"'
+        echo ""
+        echo "After installation, restart your terminal and run this build script again."
+        echo ""
+        echo "Alternative: Install Python from python.org (includes tkinter)"
+        echo "  https://www.python.org/downloads/"
+        echo ""
+        read -p "Press Enter to exit..."
+        exit 1
+    fi
+    
+    echo "✓ Homebrew is installed"
+    brew --version | head -n 1
+    echo ""
+fi
+
 # Check and install tkinter if needed (macOS Homebrew Python issue)
-echo "[Step 2/6] Checking tkinter availability..."
+if [[ "$OSTYPE" == "darwin"* ]]; then
+    echo "[Step 3/7] Checking tkinter availability..."
+else
+    echo "[Step 2/6] Checking tkinter availability..."
+fi
 if ! python3 -c "import tkinter" &> /dev/null; then
     echo "⚠ tkinter not found - this is required for the GUI"
     
@@ -144,7 +184,11 @@ fi
 echo ""
 
 # Check/create virtual environment
-echo "[Step 3/6] Setting up virtual environment..."
+if [[ "$OSTYPE" == "darwin"* ]]; then
+    echo "[Step 4/7] Setting up virtual environment..."
+else
+    echo "[Step 3/6] Setting up virtual environment..."
+fi
 if [ ! -d ".venv" ]; then
     echo "Creating new virtual environment..."
     python3 -m venv .venv
@@ -161,7 +205,11 @@ source .venv/bin/activate
 echo ""
 
 # Install dependencies
-echo "[Step 4/6] Installing dependencies..."
+if [[ "$OSTYPE" == "darwin"* ]]; then
+    echo "[Step 5/7] Installing dependencies..."
+else
+    echo "[Step 4/6] Installing dependencies..."
+fi
 echo "This may take a few minutes on first run..."
 python -m pip install --upgrade pip --quiet
 
@@ -182,7 +230,11 @@ echo "✓ All dependencies installed successfully"
 echo ""
 
 # Clean previous builds
-echo "[Step 5/6] Cleaning previous builds..."
+if [[ "$OSTYPE" == "darwin"* ]]; then
+    echo "[Step 6/7] Cleaning previous builds..."
+else
+    echo "[Step 5/6] Cleaning previous builds..."
+fi
 
 # Kill any running instances of the application
 pkill -f "BrainMusicSync" 2>/dev/null || true
@@ -207,7 +259,11 @@ fi
 echo ""
 
 # Build with PyInstaller
-echo "[Step 6/6] Building executable..."
+if [[ "$OSTYPE" == "darwin"* ]]; then
+    echo "[Step 7/7] Building executable..."
+else
+    echo "[Step 6/6] Building executable..."
+fi
 echo "This may take 3-5 minutes..."
 echo ""
 pyinstaller --clean setup/build.spec

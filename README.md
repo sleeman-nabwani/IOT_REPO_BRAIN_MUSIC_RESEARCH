@@ -50,9 +50,7 @@ chmod +x setup_env.sh start_app.sh
 - 🔧 Direct code editing and testing
 - 📦 No build step required
 
-For more details, see:
-- **Windows:** [`setup/Windows/dev/README.md`](setup/Windows/dev/README.md)
-- **Linux/Mac:** [`setup/Linux_Mac/dev/README.md`](setup/Linux_Mac/dev/README.md)
+For more details, see [`setup/README.md`](setup/README.md)
 
 
 **System Overview:**
@@ -83,8 +81,7 @@ For more details, see:
 - scikit-learn: `pip install scikit-learn`
 - lightgbm: `pip install lightgbm`
 - optuna: `pip install optuna`
-- xgboost: `pip install xgboost`
-- catboost: `pip install catboost`
+
 
 
 # Folder description:

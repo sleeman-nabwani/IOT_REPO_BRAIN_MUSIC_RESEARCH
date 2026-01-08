@@ -98,39 +98,43 @@ sudo dnf install python3 python3-pip python3-tkinter
 sudo pacman -S python python-pip tk
 ```
 
-**macOS:**
+---
 
-> **⚠️ IMPORTANT: Homebrew Required for macOS**
+**🍎 macOS:**
+
+> ## ⚠️ **HOMEBREW REQUIRED FOR macOS**
 > 
-> macOS users need [Homebrew](https://brew.sh) to ensure all dependencies are available. The build script will **automatically install tkinter** if you're using Homebrew Python, but Homebrew itself must be installed first.
+> **macOS users MUST have [Homebrew](https://brew.sh) installed before building.**
+> 
+> The build script will automatically:
+> - ✅ Verify Homebrew is installed (exits with instructions if not)
+> - ✅ Check for tkinter availability
+> - ✅ Auto-install `python-tk` if using Homebrew Python
+> - ✅ Verify all dependencies before building
 
-**Why Homebrew is Required:**
-- **tkinter** (GUI library) is **not included** with Homebrew's Python by default
-- **tkinter cannot be installed via pip** - it's a system package
-- The build script detects Homebrew Python and automatically installs `python-tk` for you
-- This ensures the GUI application works correctly
+**Step-by-Step Installation:**
 
-**Installation:**
 ```bash
-# 1. Install Homebrew (if not already installed)
+# Step 1: Install Homebrew (REQUIRED)
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
 
-# 2. Install Python (the build script will auto-install python-tk when needed)
+# Step 2: Install Python via Homebrew
 brew install python
 
-# 3. Run the build - tkinter will be installed automatically!
+# Step 3: Run the build script (it handles the rest automatically!)
 cd setup/Linux_Mac
+chmod +x build_app.sh
 ./build_app.sh
 ```
 
-**Alternative (Without Homebrew):**
-If you prefer not to use Homebrew, install Python from [python.org](https://www.python.org/downloads/) which includes tkinter by default.
+**Why Homebrew is Required:**
+- **tkinter** (GUI library) is not included with Homebrew's Python by default
+- **tkinter cannot be installed via pip** - it's a system package that requires Homebrew
+- The build script will auto-install `python-tk@<version>` if needed
+- Ensures all dependencies work correctly on macOS
 
-**What the Build Script Does:**
-1. ✅ Detects if you're using Homebrew Python
-2. ✅ Checks if tkinter is available
-3. ✅ Automatically runs `brew install python-tk@<version>` if needed
-4. ✅ Verifies installation before proceeding
+**Alternative (Without Homebrew):**
+If you prefer not to use Homebrew, install Python from [python.org](https://www.python.org/downloads/) which includes tkinter by default. **However, the build script will still check for Homebrew and may show a warning.**
 
 #### **Distribution:**
 
