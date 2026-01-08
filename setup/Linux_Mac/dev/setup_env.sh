@@ -4,12 +4,13 @@
 # BRAIN MUSIC INTERFACE - SETUP WIZARD (Linux/Mac)
 # ======================================================================================
 
+# Navigate to project root (three levels up from setup/Linux_Mac/dev/)
+cd "$(dirname "$0")/../../.." || exit 1
+
 # SETUP NOTE:
 # If you want to do a full test run on Windows (using WSL), create a separate copy of 
 # your project folder (e.g., test_linux), open WSL in that folder, and run it there.
 # Do NOT run this in the same folder as your Windows setup, or it will break your .venv!
-# BRAIN MUSIC INTERFACE - SETUP WIZARD (Linux/Mac)
-# ======================================================================================
 
 echo "=================================================="
 echo "      BRAIN MUSIC INTERFACE - SETUP WIZARD"

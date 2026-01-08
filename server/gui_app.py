@@ -12,6 +12,7 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
 # --- Mock imports for context ---
 try:
+    from utils.paths import get_logs_dir, get_models_dir, get_plots_dir, get_midi_dir, get_research_dir, get_app_root
     from utils.plotter import _elapsed_to_seconds, LivePlotter, generate_post_session_plot
     from utils.process_manager import SubprocessManager
     from utils.comms import send_calibration_command
@@ -130,6 +131,10 @@ class GuiApp:
                        foreground="white", borderwidth=0, padding=(20, 14))
         style.map("Success.TButton", background=[("active", "#059669"), ("disabled", "#3b3f5c")])
         
+        style.configure("Info.TButton", font=("Segoe UI", 11, "bold"), background="#3b82f6", 
+                       foreground="white", borderwidth=0, padding=(20, 14))
+        style.map("Info.TButton", background=[("active", "#2563eb"), ("disabled", "#3b3f5c")])
+        
         style.configure("Compact.TButton", background=self.P["input_bg"], foreground=self.P["text_input"], 
                        borderwidth=0, padding=(10, 6), font=("Segoe UI", 9))
         style.map("Compact.TButton", background=[("active", "#e5e7eb")])
@@ -245,8 +250,8 @@ class GuiApp:
                        arrowsize=0,
                        relief="flat")
 
-        base_dir = Path(__file__).resolve().parent.parent
-        default_midi = base_dir / "midi_files" / "Technion_March1.mid"
+        base_dir = get_midi_dir()
+        default_midi = base_dir / "Technion_March1.mid"
         
         self.session_thread = None
         self.status_queue = SimpleQueue()
@@ -729,7 +734,7 @@ class GuiApp:
     def get_midi_files(self):
         """Scans midi_files/ directory."""
         try:
-            return [f.name for f in Path(__file__).resolve().parent.parent.joinpath("midi_files").glob("*.mid")]
+            return [f.name for f in get_midi_dir().glob("*.mid")]
         except: return []
 
     def refresh_midi_list(self):
@@ -738,7 +743,7 @@ class GuiApp:
 
     def _refresh_model_list(self):
         """Scan for available prediction models (base + user heads)."""
-        models_dir = Path(__file__).resolve().parent.parent / "research" / "LightGBM" / "results" / "models"
+        models_dir = get_models_dir()
         model_options = []
         self._model_paths = {}  # Map display name -> actual path
         
@@ -848,7 +853,7 @@ class GuiApp:
             p = Path(m_name)
         else:
             # Try finding it in midi_files
-            p = Path(__file__).resolve().parent.parent / "midi_files" / m_name
+            p = get_midi_dir() / m_name
             
         if not p.exists(): messagebox.showerror("Error", f"MIDI not found: {m_name}"); return
         
@@ -942,7 +947,7 @@ class GuiApp:
     def get_midi_files(self):
         """Scans midi_files/ directory."""
         try:
-            base_dir = Path(__file__).resolve().parent.parent / "midi_files"
+            base_dir = get_midi_dir()
             if not base_dir.exists(): return []
             return [f.name for f in base_dir.glob("*.mid")]
         except: return []
@@ -959,7 +964,7 @@ class GuiApp:
         Ignores default timestamped folders (start with 'session_').
         """
         try:
-            log_dir = Path(__file__).resolve().parent.parent / "logs"
+            log_dir = get_logs_dir()
             if not log_dir.exists(): return []
             
             # Find folders that are NOT default sessions
@@ -997,7 +1002,7 @@ class GuiApp:
     def refresh_analysis_subjects(self):
         """Populate the first dropdown with Subject/Folder names."""
         try:
-            log_dir = Path(__file__).resolve().parent / "logs"
+            log_dir = get_logs_dir()
             if not log_dir.exists(): 
                 self.subject_combo['values'] = []
                 return
@@ -1019,7 +1024,7 @@ class GuiApp:
         if not subject: return
         
         try:
-            log_dir = Path(__file__).resolve().parent / "logs" / subject
+            log_dir = get_logs_dir() / subject
             if not log_dir.exists():
                 self.session_combo['values'] = []
                 return
@@ -1044,7 +1049,7 @@ class GuiApp:
             return
         
         # Construct path from both dropdowns
-        base_dir = Path(__file__).resolve().parent / "logs" / subject / session_name
+        base_dir = get_logs_dir() / subject / session_name
         plot_path = base_dir / "BPM_plot.png"
         
         if not plot_path.exists():
@@ -1457,7 +1462,7 @@ class GuiApp:
     def _refresh_training_sessions(self):
         """Scan logs directory and populate session tree."""
         self.session_tree.delete(*self.session_tree.get_children())
-        logs_dir = Path(__file__).resolve().parent / "logs"
+        logs_dir = get_logs_dir()
         if not logs_dir.exists():
             return
 
@@ -1563,7 +1568,7 @@ class GuiApp:
                 
                 if train_type == "base":
                     # Run train_lgbm.py with selected sessions
-                    script = Path(__file__).resolve().parent.parent / "research" / "LightGBM" / "train_lgbm.py"
+                    script = get_research_dir() / "LightGBM" / "train_lgbm.py"
                     cmd = [sys.executable, str(script), "--sessions-file", sessions_file.name]
                     # Add Optuna optimization if enabled
                     if use_optuna:
@@ -1571,7 +1576,7 @@ class GuiApp:
                         cmd.extend(["--trials", str(optuna_trials)])
                 else:
                     # Run train_user_head.py with selected sessions
-                    script = Path(__file__).resolve().parent.parent / "research" / "LightGBM" / "train_user_head.py"
+                    script = get_research_dir() / "LightGBM" / "train_user_head.py"
                     cmd = [sys.executable, str(script), "--sessions-file", sessions_file.name, "--suffix", user_head_name.replace(" ", "_")]
 
                 self.root.after(0, lambda: self._log_training(f"Running: {' '.join(cmd)}"))
@@ -1582,7 +1587,7 @@ class GuiApp:
                     stderr=subprocess.STDOUT,
                     text=True,
                     bufsize=1,
-                    cwd=str(Path(__file__).resolve().parent.parent)
+                    cwd=str(get_app_root())
                 )
                 self.training_process = proc
 
@@ -1635,7 +1640,7 @@ class GuiApp:
 
     def _view_training_results(self):
         """Open a window displaying training result plots."""
-        results_dir = Path(__file__).resolve().parent.parent / "research" / "LightGBM" / "results" / "plots"
+        results_dir = get_plots_dir()
         
         if not results_dir.exists():
             messagebox.showinfo("No Results", "No training results found. Run training first.")
@@ -1840,7 +1845,7 @@ class GuiApp:
             return
         
         # Construct path from both dropdowns
-        base_dir = Path(__file__).resolve().parent / "logs" / subject / session_name
+        base_dir = get_logs_dir() / subject / session_name
         plot_path = base_dir / "BPM_plot.png"
         
         if not plot_path.exists():
@@ -2097,6 +2102,8 @@ class GuiApp:
         style.map("Primary.TButton", background=[("active", self.P["accent_hover"])])
         style.configure("Danger.TButton", background=self.P["danger"], foreground="white")
         style.configure("Success.TButton", background=self.P["success"], foreground="white")
+        style.configure("Info.TButton", background="#3b82f6", foreground="white")
+        style.map("Info.TButton", background=[("active", "#2563eb")])
         secondary_bg = "#64748b" if self.theme_mode == "light" else "#475569"
         style.configure("Secondary.TButton", background=secondary_bg, foreground="white")
         style.map("Secondary.TButton", background=[("active", "#475569" if self.theme_mode == "light" else "#334155")])

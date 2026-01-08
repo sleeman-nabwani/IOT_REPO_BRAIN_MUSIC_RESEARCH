@@ -251,7 +251,7 @@ def analyze_bpm_distribution(logs_dir=None, session_paths=None):
         processed_df = process_walking_data(raw_df)
     else:
         # Load all sessions from directory
-        raw_df, processed_df = get_raw_and_processed_sessions(logs_dir)
+    raw_df, processed_df = get_raw_and_processed_sessions(logs_dir)
 
     if raw_df.empty:
         print("No data found.")

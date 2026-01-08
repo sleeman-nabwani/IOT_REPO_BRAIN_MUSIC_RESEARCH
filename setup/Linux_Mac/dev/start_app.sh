@@ -4,6 +4,9 @@
 # BRAIN MUSIC INTERFACE - LAUNCHER SCRIPT (Linux/Mac)
 # ======================================================================================
 
+# Navigate to project root (three levels up from setup/Linux_Mac/dev/)
+cd "$(dirname "$0")/../../.." || exit 1
+
 echo "=================================================="
 echo "      STARTING BRAIN MUSIC INTERFACE..."
 echo "=================================================="

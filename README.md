@@ -16,17 +16,43 @@ The backend calculates the BPM in real-time and scales the playback speed of MID
 
 # Installation & Usage:
 
-**1. Setup:**
+## 📦 **Option 1: Build Standalone Application (Recommended)**
 
-Run the setup script for your operating system. This will automatically create a virtual environment and **install all required dependencies** listed in `requirements.txt` (e.g., pandas, matplotlib, scikit-learn).
-- **Windows:** Run `setup_env.bat`
-- **Linux/Mac:** Run `setup_env.sh` (ensure permissions: `chmod +x setup_env.sh`)
+Build a portable executable that can be distributed without Python:
 
-**2. Running:**
+- **All Platforms:** See [`setup/README.md`](setup/README.md) for complete build & setup instructions
 
-Launch the application using the start script:
-- **Windows:** Run `start_app.bat`
-- **Linux/Mac:** Run `start_app.sh`
+The standalone application includes all dependencies, MIDI files, and 266 training sessions.
+
+---
+
+## 🐍 **Option 2: Run from Source (Development)**
+
+For developers who want to run directly from Python source code:
+
+**Windows:**
+```batch
+cd setup\Windows\dev
+setup_env.bat      # First time: installs dependencies
+start_app.bat      # Run the application
+```
+
+**Linux/Mac:**
+```bash
+cd setup/Linux_Mac/dev
+chmod +x setup_env.sh start_app.sh
+./setup_env.sh     # First time: installs dependencies
+./start_app.sh     # Run the application
+```
+
+**Benefits:**
+- ⚡ Faster iteration during development
+- 🔧 Direct code editing and testing
+- 📦 No build step required
+
+For more details, see:
+- **Windows:** [`setup/Windows/dev/README.md`](setup/Windows/dev/README.md)
+- **Linux/Mac:** [`setup/Linux_Mac/dev/README.md`](setup/Linux_Mac/dev/README.md)
 
 
 **System Overview:**

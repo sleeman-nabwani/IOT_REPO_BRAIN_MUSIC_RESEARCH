@@ -5,6 +5,9 @@
 :: This script handles the initial installation. It creates a Python virtual environment,
 :: installs all dependencies, and trains the initial KNN model.
 
+:: Navigate to project root (three levels up from setup/Windows/dev/)
+cd /d "%~dp0..\..\..\"
+
 title BRAIN MUSIC INTERFACE - SETUP
 cls
 echo ==================================================

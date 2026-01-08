@@ -5,6 +5,9 @@
 :: This script is the entry point for the user. It ensures the application runs
 :: inside the correct Python Virtual Environment (.venv) to avoid missing libraries.
 
+:: Navigate to project root (three levels up from setup/Windows/dev/)
+cd /d "%~dp0..\..\..\"
+
 title BRAIN MUSIC INTERFACE
 cls
 
