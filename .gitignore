@@ -1,4 +1,6 @@
 ESP32/SECRETS.h
+build/
+dist/
 server/.idea/
 server/__pycache__/
 server/utils/__pycache__/
