@@ -99,6 +99,65 @@ def parse_args() -> argparse.Namespace:
         help="Enable hybrid mode (starts dynamic, locks if steady)",
     )
     parser.add_argument(
+        "--random",
+        action="store_true",
+        help="Enable Random Drift Mode",
+    )
+    parser.add_argument(
+        "--random-span",
+        type=float,
+        default=0.20,
+        help="Difficulty span for Random Mode (0.0-0.5)",
+    )
+    parser.add_argument(
+        "--random-gamified",
+        type=int,
+        default=0,
+        help="Enable gamified (time-based) random mode (1=True, 0=False)",
+    )
+    parser.add_argument(
+        "--random-simple-threshold",
+        type=float,
+        default=5.0,
+        help="BPM spread to match in simple mode",
+    )
+    parser.add_argument(
+        "--random-simple-steps",
+        type=int,
+        default=20,
+        help="Consecutive steps to match in simple mode",
+    )
+    parser.add_argument(
+        "--random-simple-timeout",
+        type=float,
+        default=30.0,
+        help="Timeout (seconds) to fallback in simple mode",
+    )
+    parser.add_argument(
+        "--hybrid-lock-steps",
+        type=int,
+        default=5,
+        help="Steps needed to lock in hybrid mode",
+    )
+    parser.add_argument(
+        "--hybrid-unlock-time",
+        type=float,
+        default=1.5,
+        help="Seconds of deviation to unlock in hybrid mode",
+    )
+    parser.add_argument(
+        "--hybrid-stability-threshold",
+        type=float,
+        default=3.0,
+        help="BPM spread to consider stable in hybrid mode",
+    )
+    parser.add_argument(
+        "--hybrid-unlock-threshold",
+        type=float,
+        default=15.0,
+        help="BPM deviation to trigger unlock in hybrid mode",
+    )
+    parser.add_argument(
         "--calibrate-weight",
         type=int,
         default=None,
@@ -202,7 +261,15 @@ def main(args, status_callback=print, stop_event=None, session_dir_callback=None
     midi_path = args.midi_path
     smoothing_window = getattr(args, 'smoothing', 3)
     stride = getattr(args, 'stride', 1)
-    run_type = "manual" if args.manual else ("hybrid" if getattr(args, "hybrid", False) else "dynamic")
+    
+    if args.manual:
+        run_type = "manual"
+    elif getattr(args, "hybrid", False):
+        run_type = "hybrid"
+    elif getattr(args, "random", False):
+        run_type = "random"
+    else:
+        run_type = "dynamic"
 
     # Calibration-only flow: open serial, send CAL_WEIGHT, and exit.
     if getattr(args, "calibrate_weight", None) is not None:
@@ -257,6 +324,8 @@ def main(args, status_callback=print, stop_event=None, session_dir_callback=None
             player.set_BPM(args.bpm)
         else:
             logger.log(f"Using default song BPM: {player.songBPM}")
+    elif getattr(args, "random", False):
+        logger.log("Starting in RANDOM DRIFT MODE.")
     else:
         logger.log("Starting in DYNAMIC MODE")
     logger.log(f"Run type: {run_type}")
@@ -275,13 +344,18 @@ def main(args, status_callback=print, stop_event=None, session_dir_callback=None
     bpm_estimation = BPM_estimation(
         player,
         logger,
-        manual_mode=args.manual,
+        initial_mode=run_type,
         manual_bpm=args.bpm,
         prediction_model=prediction_model,
-        smoothing_window=smoothing_window,
-        stride=stride,
-        run_type=run_type,
-        hybrid_mode=getattr(args, 'hybrid', False),
+        random_span=args.random_span,
+        random_gamified=(args.random_gamified == 1),
+        hybrid_lock_steps=args.hybrid_lock_steps,
+        hybrid_unlock_time=args.hybrid_unlock_time,
+        hybrid_stability_threshold=args.hybrid_stability_threshold,
+        hybrid_unlock_threshold=args.hybrid_unlock_threshold,
+        random_simple_threshold=args.random_simple_threshold,
+        random_simple_steps=args.random_simple_steps,
+        random_simple_timeout=args.random_simple_timeout,
     )
     if args.alpha_up is not None:
         bpm_estimation.set_smoothing_alpha_up(args.alpha_up)

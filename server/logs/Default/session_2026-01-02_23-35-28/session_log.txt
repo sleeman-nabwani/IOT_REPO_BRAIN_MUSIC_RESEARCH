@@ -1,0 +1,9 @@
+Session log started at 2026-01-02_23-35-28 (t=0.000)
+[00:00:00.010] DEBUG: Attempting to initialize MidiBeatSync...
+[00:00:00.987] DEBUG: MidiBeatSync initialized successfully.
+[00:00:00.989] Starting in DYNAMIC MODE
+[00:00:00.989] Run type: dynamic
+[00:00:03.907] Prediction model enabled (LightGBM)
+[00:00:03.908] Session started
+[00:00:03.912] DEBUG: Attempting to open serial port COM5...
+[00:00:03.915] Failed to open serial port COM5: could not open port 'COM5': PermissionError(13, 'Access is denied.', None, 5)

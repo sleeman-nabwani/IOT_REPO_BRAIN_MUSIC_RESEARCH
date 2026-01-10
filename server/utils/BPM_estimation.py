@@ -3,273 +3,211 @@ import threading
 from .midi_player import MidiBeatSync
 from .logger import Logger
 from .LGBM_predictor import LGBMPredictor
-from collections import deque
-from statistics import mean, stdev
+
+# Import Modes
+from .Modes.manual_mode import ManualMode
+from .Modes.random_mode import RandomMode
+from .Modes.dynamic_mode import DynamicMode
+from .Modes.hybrid_mode import HybridMode
 
 class BPM_estimation:
-    def __init__(self, player: MidiBeatSync, logger: Logger, manual_mode: bool = False,
+    def __init__(self, player: MidiBeatSync, logger: Logger, initial_mode: str = "dynamic",
                 manual_bpm: float = None, prediction_model: LGBMPredictor = None,
-                smoothing_window: int = 3, stride: int = 1,
-                run_type: str | None = None, hybrid_mode: bool = False) -> None:
-        self.last_msg_time = time.time()
+                random_span: float = 0.20, random_gamified: bool = False,
+                hybrid_lock_steps: int = 5, hybrid_unlock_time: float = 1.5,
+                hybrid_stability_threshold: float = 3.0, hybrid_unlock_threshold: float = 15.0,
+                random_simple_threshold: float = 5.0, random_simple_steps: int = 20,
+                random_simple_timeout: float = 30.0) -> None:
+        
+        # ------------ Context ------------
         self.player = player
         self.logger = logger
-        self.last_recorded_bpm = 0
-        self.manual_mode = manual_mode
-        self._pending_manual_bpm = manual_bpm
-        self.smoothing_alpha_up = 0.025   # Smoothing when speeding up (Attack)
-        self.smoothing_alpha_down = 0.025 # Smoothing when slowing down (Decay)
-        self.step_count = 0 # Track number of steps for delayed start
         self.prediction_model = prediction_model
-        self._warmup_done = threading.Event()
-        self._warmup_failed = False
-        self._warmup_thread = None
-        self.smoothing_window = smoothing_window
-        self.stride = stride
-        self.run_type = run_type or "dynamic"
         
-        # Hybrid Mode (Cruise Control)
-        self.hybrid_mode = hybrid_mode
-        self.stability_buffer = deque(maxlen=10) # 5 steps to determine initial lock
-        self.unlock_buffer = deque(maxlen=3)     # 3 steps to determine unlock (average)
-        self.locked_bpm = 0.0
-        self.unlock_start_time = None
-        self.UNLOCK_DURATION = 1.0 # Seconds of sustained deviation to unlock
-
-        # TARGET BPM: This is where we WANT to be.
-        # The 'walkingBPM' is where we ARE currently.
-        # We will smoothly slide 'walkingBPM' -> 'target_bpm' every loop.
-        self.target_bpm = player.walkingBPM
-        
-        # Time-Based Smoothing
+        # ------------ State ------------
+        self.step_count = 0
+        self.last_msg_time = time.time()
         self.last_update_time = time.time()
         self.last_gui_log_time = time.time()
+        
+        # ------------ Modes ------------
+        self.manual_mode_obj = ManualMode(self)
+        self.random_mode_obj = RandomMode(self, span=random_span, gamified=random_gamified,
+                                          simple_threshold=random_simple_threshold,
+                                          simple_steps=random_simple_steps,
+                                          simple_timeout=random_simple_timeout)
+        self.dynamic_mode_obj = DynamicMode(self)
+        self.hybrid_mode_obj = HybridMode(self, lock_steps=hybrid_lock_steps, 
+                                          unlock_time=hybrid_unlock_time,
+                                          stability_threshold=hybrid_stability_threshold,
+                                          unlock_threshold=hybrid_unlock_threshold)
+        
+        # ------------ Active State ------------
+        self.active_mode = initial_mode # "dynamic", "random", "manual", "hybrid"
+        
+        # ------------ Configuration ------------
+        if manual_bpm: 
+            self.set_manual_bpm(manual_bpm)
+        
+        # Apply specific configs if starting in that mode
+        if self.active_mode == "random":
+            self.set_random_span(random_span)
+            self.set_random_gamified(random_gamified)
+            self.set_random_simple_threshold(random_simple_threshold)
+            self.set_random_simple_steps(random_simple_steps)
+            self.set_random_simple_timeout(random_simple_timeout)
+            self.random_mode_obj.activate()
+        
+        elif self.active_mode == "hybrid":
+            self.set_hybrid_lock_steps(hybrid_lock_steps)
+            self.set_hybrid_unlock_time(hybrid_unlock_time)
+            self.set_hybrid_stability_threshold(hybrid_stability_threshold)
+            self.set_hybrid_unlock_threshold(hybrid_unlock_threshold)
+            self.hybrid_mode_obj.activate()
+            
+        elif self.active_mode == "manual": 
+            self.manual_mode_obj.activate()
+            
+        elif self.active_mode == "dynamic": 
+            self.dynamic_mode_obj.activate()
 
-        # Warm-up the predictor off the main path to avoid first-step stall.
+        # ------------ Smoothing Params ------------
+        self.smoothing_alpha_up = 0.025
+        self.smoothing_alpha_down = 1.0
+        self.target_bpm = player.walkingBPM
+
+        # ------------ ML Warmup ------------
+        self._warmup_done = threading.Event()
+        self._warmup_failed = False
         if self.prediction_model:
-            self._warmup_thread = threading.Thread(
-                target=self._run_warmup, args=(player.walkingBPM,), daemon=True
-            )
-            self._warmup_thread.start()
+            threading.Thread(target=self._run_warmup, args=(player.walkingBPM,), daemon=True).start()
 
-    # Added this in order to change the smoothing factor at runtime:
-    # Added this in order to change the smoothing factor at runtime:
-    def set_smoothing_alpha_up(self, alpha: float):
-        """Update the Attack smoothing factor (0.001 - 1.0)."""
-        self.smoothing_alpha_up = max(0.001, min(1.0, float(alpha)))
-
-    def set_smoothing_alpha_down(self, alpha: float):
-        """Update the Decay smoothing factor (0.001 - 1.0)."""
-        self.smoothing_alpha_down = max(0.001, min(1.0, float(alpha)))
-
-    def set_manual_bpm(self, bpm: float | None):
-        """Queue a manual BPM update to be applied on the next iteration."""
-        self._pending_manual_bpm = bpm
-
+    # ----------- State Switches -----------
+    
+    # --- manual mode ---
     def set_manual_mode(self, enabled: bool):
-        """Switch between manual and dynamic modes at runtime."""
-        self.manual_mode = bool(enabled)
-        # Reset buffers on manual switch to avoid instant re-trigger
-        if enabled:
-           self.stability_buffer.clear()
-        else:
-           self.unlock_buffer.clear()
-           self.unlock_start_time = None
+        self.active_mode = "manual"
+        self.manual_mode_obj.activate()
 
-    def register_button_delta(self, delta: float):
-        """
-        Called when a physical button press (delta) is received.
-        Only applies change if in Manual Mode (or Hybrid-Locked).
-        """
-        if self.manual_mode:
-            current_bpm = self.player.walkingBPM
-            new_bpm = current_bpm + delta
-            new_bpm = max(40, min(240, new_bpm)) # Safety Clamp
-            
-            # Apply immediately
-            self.player.set_BPM(new_bpm)
-            self.target_bpm = new_bpm
-            self.locked_bpm = new_bpm # Update lock target too
-            
-            self.logger.log(f"MANUAL: Adjusted BPM to {new_bpm:.1f} (Delta {delta})")
-            return new_bpm
-        return None
+    def set_manual_bpm(self, bpm: float):
+        self.manual_mode_obj.set_bpm(bpm)
+    
+    # --- random mode ---
+    def set_random_mode(self, enabled: bool):
+        self.active_mode = "random"
+        self.random_mode_obj.activate()
 
-    def check_manual_bpm_update(self):
-        # Return pending BPM if set, and clear it
-        if self._pending_manual_bpm is not None:
-            bpm = self._pending_manual_bpm
-            self._pending_manual_bpm = None
-            return bpm
-        return None
+    def set_random_span(self, span: float):
+        self.random_mode_obj.set_span(span)
 
+    def set_random_gamified(self, enabled: bool):
+        self.random_mode_obj.set_gamified(enabled)
+
+    def set_random_simple_threshold(self, threshold: float):
+        self.random_mode_obj.set_simple_threshold(threshold)
+
+    def set_random_simple_steps(self, steps: int):
+        self.random_mode_obj.set_simple_steps(steps)
+
+    def set_random_simple_timeout(self, seconds: float):
+        self.random_mode_obj.set_simple_timeout(seconds)
+
+    # --- hybrid mode ---
+    def set_hybrid_mode(self, enabled: bool):
+        self.active_mode = "hybrid"
+        self.hybrid_mode_obj.activate()
+
+    def set_hybrid_lock_steps(self, steps: int):
+        self.hybrid_mode_obj.set_lock_steps(steps)
+
+    def set_hybrid_unlock_time(self, seconds: float):
+        self.hybrid_mode_obj.set_unlock_time(seconds)
+
+    def set_hybrid_stability_threshold(self, bpm: float):
+        self.hybrid_mode_obj.set_stability_threshold(bpm)
+
+    def set_hybrid_unlock_threshold(self, bpm: float):
+        self.hybrid_mode_obj.set_unlock_threshold(bpm)
+
+    # --- dynamic mode ---
+    def set_dynamic_mode(self, enabled: bool):
+        self.active_mode = "dynamic"
+        self.dynamic_mode_obj.activate()
+   
+
+    def _get_active_mode(self):
+        if self.active_mode == "manual": return self.manual_mode_obj
+        if self.active_mode == "random": return self.random_mode_obj
+        if self.active_mode == "hybrid": return self.hybrid_mode_obj
+        return self.dynamic_mode_obj
+
+    def _run_warmup(self, initial_bpm):
+        try: self.prediction_model.warmup(initial_bpm)
+        except: self._warmup_failed = True
+        finally: self._warmup_done.set()
+    
+    # ----------- Alpha control -----------
+    def set_smoothing_alpha_up(self, a): self.smoothing_alpha_up = float(a)
+    def set_smoothing_alpha_down(self, a): self.smoothing_alpha_down = float(a)
+
+
+    # ----------- Input Handling -----------
     def register_step(self, new_bpm, instant_bpm=None):
-        """
-        Called when a NEW STEP is detected. 
-        Instead of changing music instantly, we just update the TARGET.
-        The update_bpm() loop will handle the smooth transition.
-        """
-        # HYBRID MODE LOGIC
-        if self.hybrid_mode:
-            # 1. We are currently in DYNAMIC mode -> Check if we should LOCK
-            if not self.manual_mode:
-                self.stability_buffer.append(new_bpm)
-                if len(self.stability_buffer) == self.stability_buffer.maxlen:
-                    # Calculate deviation
-                    try:
-                        dev = stdev(self.stability_buffer)
-                    except: # handle potential math errors (e.g. constant values)
-                        dev = 0.0
-                    
-                    # If stable (stddev < 3 BPM), lock it!
-                    if dev < 5.0:
-                        start_time = time.time()
-                        # Lock to the MEAN of the buffer
-                        avg_bpm = mean(self.stability_buffer)
-                        self.locked_bpm = avg_bpm
-                        self.set_manual_mode(True)
-                        self.set_manual_bpm(self.locked_bpm) # Queue update for main loop
-                        self.logger.log(f"cruise_control: Locked at {avg_bpm:.1f} BPM (StdDev: {dev:.2f})")
-                        
-            # 2. We are currently in LOCKED (Manual) mode -> Check if we should UNLOCK
-            elif self.manual_mode:
-                self.unlock_buffer.append(new_bpm)
-                if len(self.unlock_buffer) == self.unlock_buffer.maxlen:
-                    current_avg = mean(self.unlock_buffer)
-                    
-                    # Check deviation from locked BPM
-                    if abs(current_avg - self.locked_bpm) > 8.0:
-                            # UNLOCK:
-                            self.set_manual_mode(False)
-                            self.logger.log(f"cruise_control: Disengaged (Avg: {current_avg:.1f} vs Locked: {self.locked_bpm:.1f})")
-                            self.unlock_start_time = None
-                    else:
-                        # Back to stable, reset timer
-                        self.unlock_start_time = None
-        self.target_bpm = new_bpm
-        self.last_recorded_bpm = new_bpm
-        self.last_msg_time = time.time() # Reset the decay timer
+        """Called when a new step is detected."""
+        self.last_msg_time = time.time()
         self.step_count += 1
         
-        # Prediction model (LightGBM) — only after warmup completes.
+        # ML Prediction Hook
         if self.prediction_model and self._warmup_done.is_set() and not self._warmup_failed:
             try:
                 self.prediction_model.add_step(new_bpm, instant_bpm)
-                pred = self.prediction_model.predict_next(
-                    smoothing_window=self.smoothing_window,
-                    stride=self.stride,
-                    run_type=self.run_type,
-                )
-                if pred is not None:
-                    # Blend to avoid sudden jumps while still using fresh prediction.
-                    self.target_bpm = float(pred) * 0.65 + new_bpm * 0.35
-            except Exception:
-                pass
+                pred = self.prediction_model.predict_next()
+                if pred: 
+                    # Blending prediction
+                     new_bpm = float(pred) * 0.65 + new_bpm * 0.35
+            except: pass
 
-    def _run_warmup(self, initial_bpm: float | None):
-        try:
-            self.prediction_model.warmup(initial_bpm, run_type=self.run_type)
-        except Exception:
-            self._warmup_failed = True
-        finally:
-            self._warmup_done.set()
+        # Notify active mode
+        mode = self._get_active_mode()
+        mode.on_step(new_bpm, self.last_msg_time)
+
+    def register_button_delta(self, delta: float):
+        """Hardware button press."""
+        # Force manual mode if button pressed?
+        # Current logic: If in manual mode, adjust it.
+        if self.active_mode == "manual":
+            new_val = self.manual_mode_obj.adjust_bpm(delta)
+            self.player.set_BPM(new_val)
+            self.target_bpm = new_val
+            
+            # Notify GUI
+            import sys
+            print(f"GUI_SYNC:MANUAL_BPM:{new_val}")
+            sys.stdout.flush()
+            return new_val
+        return None
 
 
-    def update_recorded_values(self,last_msg_time: float, last_recorded_bpm: float):
-        # Keeps legacy compatibility, but register_step is preferred.
-        self.last_msg_time = last_msg_time
-        self.last_recorded_bpm = last_recorded_bpm
-
+     # ----------- Main Loop -----------
     def update_bpm(self):
-        """
-        Main Loop Function.
-        This runs ~100 times per second.
-        It moves the current BPM a tiny bit closer to the Target BPM every time.
-        """
+        """Called ~10Hz by main loop."""
         now_ts = time.time()
         dt = now_ts - self.last_update_time
         self.last_update_time = now_ts
-
-        if self.manual_mode:
-            if now_ts - self.last_gui_log_time > 0.1:
-                try:
-                    song_bpm = self.player.walkingBPM
-                    self.logger.log_data(now_ts, song_bpm, self.target_bpm or song_bpm, step_event=False)
-                except Exception:
-                    pass
-                self.last_gui_log_time = now_ts
-            return
         
-        # 3. Decay Logic (If user stops walking)
-        interval = now_ts - self.last_msg_time
-        if interval > 0:
-            decay_limit = 60 / interval
-            if decay_limit < self.target_bpm:
-                # Only decay if valid steps have started
-                if self.step_count > 0:
-                    self.target_bpm = decay_limit
-
-        # 4. Smoothing Logic (Target Seeking)
-        # We slide the current music BPM towards the Target BPM.
         current_bpm = self.player.walkingBPM
         
-        # optimized strictness: only update if diff is > 0.1
-        diff = abs(self.target_bpm - current_bpm)
-        
-        if diff > 0.1:
-            # Scale alpha by dt to make it frame-rate independent.
-            # Base rate assumption: 50Hz (0.02s per frame).
-            # Select Directional Smoothing Factor
-            if self.target_bpm > current_bpm:
-                # Acceleration (Attack)
-                alpha = self.smoothing_alpha_up
-                
-                # --- ADAPTIVE BOOST ---
-                # If the target is FAR ahead (e.g. user started sprinting),
-                # we boost the alpha to catch up faster.
-                bpm_diff = self.target_bpm - current_bpm
-                if bpm_diff > 5.0:
-                    # Boost Factor: Increases linearly with distance
-                    # e.g., diff=15 -> boost=1+(15-5)*0.1 = 2.0x faster
-                    boost_factor = 1.0 + (bpm_diff - 5.0) * 0.1
-                    # Cap the boost to prevent snapping
-                    boost_factor = min(boost_factor, 4.0) 
-                    alpha *= boost_factor
-            else:
-                # Deceleration (Decay)
-                alpha = self.smoothing_alpha_down
+        # Determine Target & Next BPM from Active Mode
+        mode = self._get_active_mode()
+        target, next_bpm = mode.handle_step(now_ts, current_bpm, dt)
 
-            speed_factor = alpha * 25.0
-            
-            # Simple Linear Interpolation
-            step = (self.target_bpm - current_bpm) * speed_factor * dt
-            
-            # GRADUAL STARTUP: If we are just starting (first 5 steps), limit the change speed.
-            # Max change = 10 BPM per second
-            if self.step_count < 5:
-                max_change_per_sec = 10.0
-                max_step = max_change_per_sec * dt
-                if abs(step) > max_step:
-                    step = max_step if step > 0 else -max_step
-            
-            # Clamp step to not exceed the difference (arrive at target)
-            if abs(step) > diff:
-                new_bpm = self.target_bpm
-            else:
-                new_bpm = current_bpm + step
-            
-            self.player.set_BPM(new_bpm)
-            
-            # Log significant changes (Reduced spam)
-            if abs(new_bpm - current_bpm) > 1.0:
-                self.logger.log(f"BPM sliding: {current_bpm:.2f} -> {new_bpm:.2f} (Target: {self.target_bpm:.2f})")
-            
-        # Always emit a packet periodically so the GUI updates even without diff
+        # Apply
+        self.target_bpm = target
+        self.player.set_BPM(next_bpm)
+        
+        # Logging
         if now_ts - self.last_gui_log_time > 0.1:
             try:
-                song_bpm = self.player.walkingBPM
-                self.logger.log_data(now_ts, song_bpm, self.target_bpm, step_event=False)
-            except Exception:
-                pass
+                self.logger.log_data(now_ts, current_bpm, self.target_bpm, step_event=False)
+            except: pass
             self.last_gui_log_time = now_ts
-

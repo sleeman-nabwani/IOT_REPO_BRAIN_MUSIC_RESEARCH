@@ -776,50 +776,226 @@ class GuiApp:
     def on_bpm_slider_change(self, val):
         """Handle slider movement with real-time update."""
         bpm = float(val)
-        self.bpm_val_label.configure(text=f"{int(bpm)} BPM")
+        self.bpm_str.set(f"{int(bpm)}")
         
         # If in manual mode and running, update immediately
         if self.mode_var.get() == "manual":
             if self.session_thread: 
                 self.session_thread.update_manual_bpm(bpm)
-            # We don't log every single slide event to avoid spam, 
-            # maybe just update label.
+            # We don't log every single slide event to avoid spam
+
+    def on_bpm_entry(self, event=None):
+        """Handle BPM entry."""
+        try:
+             bpm = float(self.bpm_str.get())
+             bpm = max(0, min(400, bpm))
+             self.manual_bpm_var.set(bpm)
+             self.on_bpm_slider_change(bpm)
+        except ValueError:
+             self.bpm_str.set(f"{int(self.manual_bpm_var.get())}")
+            
+    def on_random_slider_change(self, val):
+        """Update entry and backend when slider moves."""
+        span = float(val)
+        self.rnd_val_str.set(f"{span:.2f}")
+        
+        if self.mode_var.get() == "random" and self.session_thread:
+             self.session_thread.update_random_span(span)
+
+    def on_gui_sync(self, key, value):
+        """Called by SubprocessManager when backend sends a sync packet."""
+        try:
+            if key == "MANUAL_BPM":
+                bpm = float(value)
+                # Update without triggering another command (idempotent anyway)
+                self.manual_bpm_var.set(bpm)
+                self.bpm_str.set(f"{int(bpm)}")
+                # If we were using the slider value directly for display, we're good.
+        except: pass
+
+    def on_random_span_entry(self, event=None):
+        """Update slider and backend when entry changes."""
+        try:
+             span = float(self.rnd_val_str.get())
+             # Clamp
+             span = max(0.05, min(0.50, span))
+             
+             self.random_span_var.set(span) # Move slider
+             self.rnd_val_str.set(f"{span:.2f}") # Format nicely
+             
+             if self.mode_var.get() == "random" and self.session_thread:
+                 self.session_thread.update_random_span(span)
+        except ValueError:
+             # Reset to slider value if invalid
+             self.rnd_val_str.set(f"{self.random_span_var.get():.2f}")
             
     def get_selected_port(self):
         val = self.port_var.get() if not SERIAL_AVAILABLE else self.port_combo.get()
         return val.split(" - ")[0] if " - " in val else val
 
+    def validate_number(self, new_value):
+        """Allow only numeric input."""
+        if new_value == "": return True
+        try:
+            float(new_value)
+            return True
+        except ValueError:
+            return False
+
+    def _set_frame_state(self, frame, state):
+        """Recursively set state for all widgets in a frame."""
+        try: frame.configure(state=state)
+        except: pass
+        for child in frame.winfo_children():
+            try: child.configure(state=state)
+            except: pass
+            # Recurse for nested frames
+            if isinstance(child, ttk.Frame):
+                self._set_frame_state(child, state)
+
     def on_mode_change(self):
         m = self.mode_var.get()
+        
+        # Ensure container is always visible
+        self.dynamic_settings_container.pack(fill="x")
+        
+        # 1. Random Mode State
+        rnd_state = "normal" if m == "random" else "disabled"
+        self._set_frame_state(self.random_settings_frame, rnd_state)
+        
+        # 2. Manual Mode State
+        manual_state = "normal" if m == "manual" else "disabled"
+        self._set_frame_state(self.manual_bpm_frame, manual_state)
+        
+        # 3. Hybrid Mode State
+        hybrid_state = "normal" if m == "hybrid" else "disabled"
+        self._set_frame_state(self.hybrid_settings_frame, hybrid_state)
+        
+        # 3. Switch Mode on Backend
+        if not self.session_thread:
+            return
+            
         if m == "manual":
-            # Enable BPM controls
-            for child in self.manual_bpm_frame.winfo_children():
-                try: child.configure(state="normal")
-                except: pass
-            # Also the inner frames
-            for child in self.manual_bpm_frame.winfo_children():
-                if isinstance(child, ttk.Frame):
-                    for gc in child.winfo_children():
-                         try: gc.configure(state="normal")
-                         except: pass
+            self.session_thread.set_manual_mode(True)
+            # Apply current BPM immediately if switching to manual
+            val = self.manual_bpm_var.get()
+            self.on_bpm_slider_change(val)
             
-            if self.session_thread: self.session_thread.set_manual_mode(True)
+        elif m == "random":
+            self.session_thread.set_random_mode(True)
+            # Apply random span & gamify
+            val = self.random_span_var.get()
+            self.session_thread.update_random_span(val)
+            self.session_thread.update_random_gamified(self.gamify_var.get())
+            # Sync simple mode settings
+            self.session_thread.update_random_simple_threshold(self.random_simple_threshold_var.get())
+            self.session_thread.update_random_simple_steps(self.random_simple_steps_var.get())
+            self.session_thread.update_random_simple_timeout(self.random_simple_timeout_var.get())
+        
+        elif m == "hybrid":
+            self.session_thread.set_hybrid_mode(True)
+            # Apply current hybrid settings from GUI
+            self.session_thread.update_hybrid_lock_steps(self.hybrid_lock_var.get())
+            self.session_thread.update_hybrid_unlock_time(self.hybrid_unlock_var.get())
+            self.session_thread.update_hybrid_stability_threshold(self.hybrid_stability_var.get())
+            self.session_thread.update_hybrid_unlock_threshold(self.hybrid_unlock_thres_var.get())
             
-            # Apply current BPM
-            self.on_bpm_slider_change(self.manual_bpm_var.get())
-            
+        else: # dynamic
+            self.session_thread.set_dynamic_mode(True)
+             
+    def on_gamify_toggle(self):
+        """Called when gamify checkbox is toggled."""
+        is_gamified = self.gamify_var.get()
+        if is_gamified:
+            self.lbl_match_steps.configure(text="Match Hold Time")
+            self.lbl_match_steps_sub.configure(text="seconds to hold match")
         else:
-            # Disable BPM controls
-            for child in self.manual_bpm_frame.winfo_children():
-                 try: child.configure(state="disabled")
-                 except: pass
-            for child in self.manual_bpm_frame.winfo_children():
-                if isinstance(child, ttk.Frame):
-                    for gc in child.winfo_children():
-                         try: gc.configure(state="disabled")
-                         except: pass
+            self.lbl_match_steps.configure(text="Match Steps")
+            self.lbl_match_steps_sub.configure(text="consecutive steps to match")
             
-            if self.session_thread: self.session_thread.set_manual_mode(False)
+        if self.session_thread:
+            self.session_thread.update_random_gamified(is_gamified)
+            # Send current values to ensure the backend uses the right mapping immediately
+            self.session_thread.update_random_simple_threshold(self.random_simple_threshold_var.get())
+            self.session_thread.update_random_simple_steps(self.random_simple_steps_var.get())
+            self.session_thread.update_random_simple_timeout(self.random_simple_timeout_var.get())
+
+    def on_random_simple_threshold_change(self, event=None):
+        """Called when random simple threshold is changed."""
+        try:
+            bpm = float(self.random_simple_threshold_var.get())
+            bpm = max(1.0, min(20.0, bpm))  # Clamp
+            self.random_simple_threshold_var.set(bpm)
+            if self.session_thread:
+                self.session_thread.update_random_simple_threshold(bpm)
+        except ValueError:
+            self.random_simple_threshold_var.set("5.0")
+
+    def on_random_simple_steps_change(self, event=None):
+        """Called when random simple steps is changed."""
+        try:
+            steps = int(self.random_simple_steps_var.get())
+            steps = max(5, min(100, steps))  # Clamp
+            self.random_simple_steps_var.set(steps)
+            if self.session_thread:
+                self.session_thread.update_random_simple_steps(steps)
+        except ValueError:
+            self.random_simple_steps_var.set("20")
+
+    def on_random_simple_timeout_change(self, event=None):
+        """Called when random simple timeout is changed."""
+        try:
+            sec = float(self.random_simple_timeout_var.get())
+            sec = max(5.0, min(300.0, sec))  # Clamp
+            self.random_simple_timeout_var.set(sec)
+            if self.session_thread:
+                self.session_thread.update_random_simple_timeout(sec)
+        except ValueError:
+            self.random_simple_timeout_var.set("30.0")
+
+    def on_hybrid_lock_change(self, event=None):
+        """Called when hybrid lock steps is changed."""
+        try:
+            steps = int(self.hybrid_lock_var.get())
+            steps = max(2, min(20, steps))  # Clamp
+            self.hybrid_lock_var.set(steps)
+            if self.session_thread:
+                self.session_thread.update_hybrid_lock_steps(steps)
+        except ValueError:
+            self.hybrid_lock_var.set(5)
+
+    def on_hybrid_unlock_change(self, event=None):
+        """Called when hybrid unlock time is changed."""
+        try:
+            seconds = float(self.hybrid_unlock_var.get())
+            seconds = max(0.5, min(5.0, seconds))  # Clamp
+            self.hybrid_unlock_var.set(seconds)
+            if self.session_thread:
+                self.session_thread.update_hybrid_unlock_time(seconds)
+        except ValueError:
+            self.hybrid_unlock_var.set(1.5)
+
+    def on_hybrid_stability_change(self, event=None):
+        """Called when hybrid stability threshold is changed."""
+        try:
+            bpm = float(self.hybrid_stability_var.get())
+            bpm = max(1.0, min(10.0, bpm))  # Clamp
+            self.hybrid_stability_var.set(bpm)
+            if self.session_thread:
+                self.session_thread.update_hybrid_stability_threshold(bpm)
+        except ValueError:
+            self.hybrid_stability_var.set(3.0)
+
+    def on_hybrid_unlock_thres_change(self, event=None):
+        """Called when hybrid unlock threshold is changed."""
+        try:
+            bpm = float(self.hybrid_unlock_thres_var.get())
+            bpm = max(5.0, min(50.0, bpm))  # Clamp
+            self.hybrid_unlock_thres_var.set(bpm)
+            if self.session_thread:
+                self.session_thread.update_hybrid_unlock_threshold(bpm)
+        except ValueError:
+            self.hybrid_unlock_thres_var.set(15.0)
 
     def on_startup_mode_change(self):
         """Show/hide walk steps input based on startup mode selection."""
@@ -923,6 +1099,17 @@ class GuiApp:
             alpha_up=au,
             alpha_down=ad,
             hybrid_mode=(self.mode_var.get() == "hybrid"),
+            random_mode=(self.mode_var.get() == "random"),
+            random_span=self.random_span_var.get(),
+            random_gamified=self.gamify_var.get(),
+            random_simple_threshold=self.random_simple_threshold_var.get(),
+            random_simple_steps=self.random_simple_steps_var.get(),
+            random_simple_timeout=self.random_simple_timeout_var.get(),
+            hybrid_lock_steps=self.hybrid_lock_var.get(),
+            hybrid_unlock_time=self.hybrid_unlock_var.get(),
+            hybrid_stability_threshold=self.hybrid_stability_var.get(),
+            hybrid_unlock_threshold=self.hybrid_unlock_thres_var.get(),
+            gui_sync_callback=self.on_gui_sync,
             model_path=model_path,
             startup_mode=startup_mode,
             walk_steps=walk_steps,
