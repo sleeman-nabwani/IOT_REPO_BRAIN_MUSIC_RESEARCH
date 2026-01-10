@@ -17,7 +17,7 @@ const uint8_t RIGHT = 1;
 const uint8_t LEFT = 2;
 
 // Protocol (packed):
-enum MsgType : uint8_t { MSG_STEP = 1, MSG_BPM_DELTA = 2 };
+enum MsgType : uint8_t { MSG_STEP = 1, MSG_BPM_DELTA = 2, MSG_CMD = 3 };
 
 typedef struct __attribute__((packed)) {
   uint8_t type;
@@ -29,18 +29,29 @@ typedef struct __attribute__((packed)) {
     struct __attribute__((packed)) {
       int8_t delta;
     } BPM;
+    struct __attribute__((packed)) {
+      uint8_t cmd;
+      int16_t arg;
+    } Ctrl;
   };
 } Packet;
 
-// Step detection tuning:
-const int THRESHOLD = 1200;
-const int pressureBuffer = 600;
+// Control code
+const uint8_t CMD_CAL_WEIGHT = 1;
+
+// Step detection tuning (mutable after calibration):
+int threshold = 1200;
+int pressureBuffer = 600;
 const uint32_t REFRACTORY_MS = 120;
 
 uint32_t lastStepTime = 0;
 uint32_t lastStepSentTime = 0;
 bool leftFlag = false;
 bool rightFlag = false;
+
+// Control flags
+volatile bool ctrlPending = false;
+Packet ctrlPacket{};
 
 // Button tuning (hold-repeat):
 const uint32_t DEBOUNCE_MS = 25;
@@ -55,17 +66,73 @@ struct Button {
   uint32_t tChange = 0;   // last raw change time
   uint32_t tPress = 0;    // 0 = not pressed, else press start time
   uint32_t tRepeat = 0;   // last repeat tick time
-
-  Button(int p) : pin(p) {}
+  Button() = default;
+  explicit Button(int p) : pin(p) {}
 };
 
-Button buttonUp{UP_BUTTON};
-Button buttonDown{DOWN_BUTTON};
+Button buttonUp(UP_BUTTON);
+Button buttonDown(DOWN_BUTTON);
 
 // ---------------- Helpers ----------------
 inline void sendPacket(const Packet &p) {
   // Always send a fixed-size packet so receiver can parse easily
   esp_now_send(receiverMac, (const uint8_t*)&p, sizeof(Packet));
+}
+
+// ESP-NOW receive callback to catch control commands
+void onDataRecv(const uint8_t* mac, const uint8_t* incomingData, int len) {
+  if (len == (int)sizeof(Packet)) {
+    Packet p;
+    memcpy(&p, incomingData, sizeof(Packet));
+    if (p.type == MSG_CMD) {
+      ctrlPacket = p;
+      ctrlPending = true;
+    }
+  }
+}
+
+// Calibration helper: sample both FSRs, set threshold/buffer
+int calibrateWeight(uint16_t samples = 20000, uint16_t delayMs = 5, int margin = 150, int minThresh = 300) {
+  long sumR = 0, sumL = 0;
+  for (uint16_t i = 0; i < samples; i++) {
+    sumR += analogRead(RIGHT_PIN);
+    sumL += analogRead(LEFT_PIN);
+    delay(delayMs);
+  }
+  int avgR = sumR / samples;
+  int avgL = sumL / samples;
+  int baseline = max(avgR, avgL);              // heavier-loaded side
+  int newThresh = max(minThresh, baseline - margin);
+  threshold = newThresh;
+  pressureBuffer = max(200, newThresh / 2);   
+  return newThresh;
+}
+
+// Send a control ACK/ERR back to receiver (arg can carry status or threshold)
+void sendControlAck(uint8_t cmd, int16_t arg) {
+  Packet resp{};
+  resp.type = MSG_CMD;
+  resp.Ctrl.cmd = cmd;
+  resp.Ctrl.arg = arg;
+  sendPacket(resp);
+}
+
+// Process pending control commands
+void processControlIfPending() {
+  if (!ctrlPending) return;
+  noInterrupts();
+  Packet p = ctrlPacket;
+  ctrlPending = false;
+  interrupts();
+
+  if (p.Ctrl.cmd == CMD_CAL_WEIGHT) {
+    int margin = (int)p.Ctrl.arg;
+    if (margin <= 0) margin = 150;
+    int newThresh = calibrateWeight(200, 5, margin);
+    sendControlAck(CMD_CAL_WEIGHT, (int16_t)newThresh);  // Ack with new threshold value
+  } else {
+    sendControlAck(p.Ctrl.cmd, (int16_t)-1); // Unknown command -> error
+  }
 }
 
 // Fast time-based low-pass filter (IIR). 1 ADC read per loop.
@@ -165,6 +232,8 @@ void setup() {
     return;
   }
 
+  esp_now_register_recv_cb(onDataRecv);
+
   Serial.println("ready to send");
 }
 
@@ -172,6 +241,9 @@ void setup() {
 void loop() {
   // Getting the current time:
   uint32_t now =  millis();
+
+  // Handle inbound control commands (e.g., calibration)
+  processControlIfPending();
 
   // Buttons:
   bool upRaw = (digitalRead(UP_BUTTON) == LOW);
@@ -188,9 +260,9 @@ void loop() {
   int leftFsr  = lowPass(analogRead(LEFT_PIN),  lState);
 
   // Flag reset:
-  if (rightFsr <= THRESHOLD - pressureBuffer) 
+  if (rightFsr <= threshold - pressureBuffer) 
     rightFlag = false;
-  if (leftFsr  <= THRESHOLD - pressureBuffer) 
+  if (leftFsr  <= threshold - pressureBuffer) 
     leftFlag  = false;
 
   // New step detection:
@@ -199,13 +271,13 @@ void loop() {
   int triggeredFsr = 0;
 
   //checking if there is pressure on the sensors
-  if(!rightFlag && rightFsr > THRESHOLD){
+  if(!rightFlag && rightFsr > threshold){
     rightFlag = true;
     stepDetected = true;
     stepFootId = 1;
     triggeredFsr = rightFsr;
   }
-  if(!leftFlag && leftFsr > THRESHOLD){
+  if(!leftFlag && leftFsr > threshold){
     leftFlag = true;
     stepDetected = true;
     stepFootId = 2;

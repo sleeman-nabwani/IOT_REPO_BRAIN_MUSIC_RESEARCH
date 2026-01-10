@@ -1,0 +1,641 @@
+Session log started at 2026-01-05_13-56-40 (t=0.000)
+[00:00:00.002] DEBUG: Attempting to initialize MidiBeatSync...
+[00:00:00.390] DEBUG: MidiBeatSync initialized successfully.
+[00:00:00.392] Starting in DYNAMIC MODE
+[00:00:00.393] Run type: hybrid
+[00:00:02.205] Prediction model enabled: lgbm_model.joblib
+[00:00:02.207] Session started
+[00:00:02.208] DEBUG: Attempting to open serial port COM3...
+[00:00:02.273] DEBUG: Serial port COM3 opened successfully.
+[00:00:02.775] Setting smoothing window to 4
+[00:00:02.877] Smoothing window set response: ACK,WINDOW,4
+[00:00:02.979] ACK,RESET received
+[00:00:03.081] ACK,START received
+[00:00:03.081] Session handshake completed
+[00:00:03.089] Running main loop...
+[00:00:03.095] Processed: BPM=120.0
+[00:00:03.398] Processed: BPM=189.87
+[00:00:03.697] Processed: BPM=194.81
+[00:00:03.968] Processed: BPM=202.93
+[00:00:04.255] Processed: BPM=204.43
+[00:00:04.549] Processed: BPM=208.51
+[00:00:04.836] Processed: BPM=212.95
+[00:00:05.115] Processed: BPM=209.42
+[00:00:05.651] Processed: BPM=172.41
+[00:00:05.858] Processed: BPM=183.63
+[00:00:06.146] Processed: BPM=181.96
+[00:00:06.445] Processed: BPM=180.59
+[00:00:06.749] Processed: BPM=218.98
+[00:00:07.051] Processed: BPM=201.34
+[00:00:07.296] Processed: BPM=208.7
+[00:00:07.531] Processed: BPM=221.61
+[00:00:08.311] Processed: BPM=153.35
+[00:00:08.493] Processed: BPM=166.44
+[00:00:08.644] Processed: BPM=177.65
+[00:00:08.831] Processed: BPM=183.91
+[00:00:09.295] Processed: BPM=243.41
+[00:00:09.498] Processed: BPM=238.1
+[00:00:09.902] Processed: BPM=190.93
+[00:00:10.088] Processed: BPM=191.08
+[00:00:10.322] Processed: BPM=233.92
+[00:00:20.332] Processed: BPM=22.16
+[00:00:20.590] Processed: BPM=22.46
+[00:00:20.806] Processed: BPM=22.39
+[00:00:21.057] Processed: BPM=22.36
+[00:00:21.239] Processed: BPM=264.03
+[00:00:21.242] BPM sliding: 47.15 -> 49.98 (Target: 275.62)
+[00:00:21.245] BPM sliding: 49.98 -> 51.41 (Target: 275.62)
+[00:00:21.247] BPM sliding: 51.41 -> 52.64 (Target: 275.62)
+[00:00:21.249] BPM sliding: 52.64 -> 53.92 (Target: 275.62)
+[00:00:21.252] BPM sliding: 53.92 -> 55.33 (Target: 275.62)
+[00:00:21.254] BPM sliding: 55.33 -> 56.55 (Target: 275.62)
+[00:00:21.256] BPM sliding: 56.55 -> 57.93 (Target: 275.62)
+[00:00:21.259] BPM sliding: 57.93 -> 59.31 (Target: 275.62)
+[00:00:21.261] BPM sliding: 59.31 -> 60.43 (Target: 275.62)
+[00:00:21.263] BPM sliding: 60.43 -> 61.62 (Target: 275.62)
+[00:00:21.265] BPM sliding: 61.62 -> 62.71 (Target: 275.62)
+[00:00:21.267] BPM sliding: 62.71 -> 63.80 (Target: 275.62)
+[00:00:21.270] BPM sliding: 63.80 -> 64.97 (Target: 275.62)
+[00:00:21.272] BPM sliding: 64.97 -> 66.30 (Target: 275.62)
+[00:00:21.274] BPM sliding: 66.30 -> 67.36 (Target: 275.62)
+[00:00:21.277] BPM sliding: 67.36 -> 68.67 (Target: 275.62)
+[00:00:21.279] BPM sliding: 68.67 -> 69.84 (Target: 275.62)
+[00:00:21.281] BPM sliding: 69.84 -> 71.14 (Target: 275.62)
+[00:00:21.284] BPM sliding: 71.14 -> 72.22 (Target: 275.62)
+[00:00:21.286] BPM sliding: 72.22 -> 73.24 (Target: 275.62)
+[00:00:21.288] BPM sliding: 73.24 -> 74.31 (Target: 275.62)
+[00:00:21.290] BPM sliding: 74.31 -> 75.37 (Target: 275.62)
+[00:00:21.473] Processed: BPM=270.57
+[00:00:21.476] BPM sliding: 148.21 -> 149.81 (Target: 292.10)
+[00:00:21.624] Processed: BPM=293.4
+[00:00:21.627] BPM sliding: 193.46 -> 194.54 (Target: 295.81)
+[00:00:21.943] Processed: BPM=270.88
+[00:00:22.435] Processed: BPM=200.84
+[00:00:30.792] Processed: BPM=25.76
+[00:00:31.082] Processed: BPM=25.38
+[00:00:31.352] Processed: BPM=25.51
+[00:00:31.633] Processed: BPM=26.1
+[00:00:31.922] Processed: BPM=211.83
+[00:00:31.925] BPM sliding: 48.97 -> 50.96 (Target: 215.81)
+[00:00:31.929] BPM sliding: 51.86 -> 52.89 (Target: 215.81)
+[00:00:31.932] BPM sliding: 52.89 -> 53.93 (Target: 215.81)
+[00:00:31.935] BPM sliding: 53.93 -> 55.01 (Target: 215.81)
+[00:00:31.937] BPM sliding: 55.01 -> 56.04 (Target: 215.81)
+[00:00:32.219] Processed: BPM=211.64
+[00:00:32.222] BPM sliding: 136.04 -> 137.12 (Target: 214.64)
+[00:00:32.487] Processed: BPM=211.27
+[00:00:32.777] Processed: BPM=209.97
+[00:00:33.042] Processed: BPM=214.67
+[00:00:33.338] Processed: BPM=213.71
+[00:00:33.613] Processed: BPM=213.14
+[00:00:33.901] Processed: BPM=213.14
+[00:00:34.181] Processed: BPM=210.71
+[00:00:34.471] cruise_control: Locked at 212.2 BPM (StdDev: 1.45)
+[00:00:34.474] Processed: BPM=211.83
+[00:00:34.765] Processed: BPM=208.88
+[00:00:35.064] Processed: BPM=207.61
+[00:00:35.346] Processed: BPM=205.83
+[00:00:35.630] Processed: BPM=207.43
+[00:00:35.912] Processed: BPM=208.7
+[00:00:36.202] Processed: BPM=209.61
+[00:00:36.500] Processed: BPM=207.97
+[00:00:36.790] Processed: BPM=206.54
+[00:00:37.083] Processed: BPM=205.13
+[00:00:37.383] Processed: BPM=203.39
+[00:00:37.672] Processed: BPM=204.78
+[00:00:37.965] cruise_control: Disengaged (Avg: 204.1 vs Locked: 212.2)
+[00:00:37.968] Processed: BPM=204.26
+[00:00:38.236] Processed: BPM=208.51
+[00:00:38.510] Processed: BPM=213.14
+[00:00:38.786] Processed: BPM=215.25
+[00:00:39.056] Processed: BPM=220.59
+[00:00:39.346] Processed: BPM=216.41
+[00:00:39.650] Processed: BPM=210.9
+[00:00:39.934] Processed: BPM=209.61
+[00:00:40.211] Processed: BPM=207.79
+[00:00:40.479] Processed: BPM=211.27
+[00:00:40.754] cruise_control: Locked at 213.0 BPM (StdDev: 4.09)
+[00:00:40.756] Processed: BPM=216.22
+[00:00:41.038] Processed: BPM=217.59
+[00:00:41.490] Processed: BPM=187.5
+[00:00:41.941] cruise_control: Disengaged (Avg: 189.7 vs Locked: 213.0)
+[00:00:41.943] Processed: BPM=163.93
+[00:00:42.192] Processed: BPM=167.25
+[00:00:42.588] Processed: BPM=154.64
+[00:00:42.949] Processed: BPM=165.29
+[00:00:43.193] Processed: BPM=191.85
+[00:00:43.541] Processed: BPM=177.78
+[00:00:43.739] Processed: BPM=208.7
+[00:00:43.927] Processed: BPM=243.16
+[00:00:44.197] Processed: BPM=240.0
+[00:00:44.571] Processed: BPM=233.24
+[00:00:45.088] Processed: BPM=178.17
+[00:00:45.544] Processed: BPM=148.51
+[00:00:45.767] Processed: BPM=152.48
+[00:00:46.016] Processed: BPM=166.55
+[00:00:46.229] Processed: BPM=209.61
+[00:00:46.481] Processed: BPM=256.41
+[00:00:46.698] Processed: BPM=258.06
+[00:00:46.941] Processed: BPM=260.02
+[00:00:47.283] Processed: BPM=228.57
+[00:00:49.118] Processed: BPM=91.01
+[00:00:49.453] Processed: BPM=87.11
+[00:00:49.757] Processed: BPM=85.02
+[00:00:58.717] Processed: BPM=20.99
+[00:00:59.158] Processed: BPM=23.91
+[00:00:59.623] Processed: BPM=23.6
+[00:00:59.785] Processed: BPM=23.94
+[00:00:59.990] Processed: BPM=188.24
+[00:00:59.993] BPM sliding: 40.28 -> 42.36 (Target: 210.25)
+[00:01:00.116] Processed: BPM=250.52
+[00:01:00.117] BPM sliding: 86.14 -> 87.86 (Target: 271.61)
+[00:01:00.327] Processed: BPM=340.43
+[00:01:00.329] BPM sliding: 162.54 -> 164.35 (Target: 335.40)
+[00:01:00.332] BPM sliding: 164.35 -> 165.45 (Target: 335.40)
+[00:01:00.335] BPM sliding: 165.45 -> 166.52 (Target: 335.40)
+[00:01:00.337] BPM sliding: 166.52 -> 167.62 (Target: 335.40)
+[00:01:00.462] Processed: BPM=353.98
+[00:01:00.464] BPM sliding: 212.10 -> 213.59 (Target: 352.07)
+[00:01:00.639] Processed: BPM=369.23
+[00:01:00.641] BPM sliding: 262.00 -> 263.04 (Target: 365.70)
+[00:01:01.012] Processed: BPM=268.16
+[00:01:01.430] Processed: BPM=217.98
+[00:01:01.657] Processed: BPM=201.01
+[00:01:01.794] Processed: BPM=207.79
+[00:01:01.987] Processed: BPM=245.65
+[00:01:08.523] Processed: BPM=33.84
+[00:01:08.808] Processed: BPM=33.57
+[00:01:09.106] Processed: BPM=32.83
+[00:01:09.371] Processed: BPM=32.52
+[00:01:09.637] Processed: BPM=215.83
+[00:01:09.641] BPM sliding: 50.12 -> 53.76 (Target: 221.25)
+[00:01:09.644] BPM sliding: 53.76 -> 55.06 (Target: 221.25)
+[00:01:09.893] Processed: BPM=220.99
+[00:01:09.896] BPM sliding: 131.69 -> 133.00 (Target: 230.30)
+[00:01:10.164] Processed: BPM=226.63
+[00:01:10.423] Processed: BPM=227.7
+[00:01:10.690] Processed: BPM=227.92
+[00:01:11.196] Processed: BPM=184.62
+[00:01:11.530] Processed: BPM=175.82
+[00:01:11.868] Processed: BPM=165.98
+[00:01:12.265] Processed: BPM=152.28
+[00:01:12.761] Processed: BPM=153.16
+[00:01:13.463] Processed: BPM=124.29
+[00:01:16.642] Processed: BPM=50.33
+[00:01:16.964] Processed: BPM=51.05
+[00:01:17.265] Processed: BPM=53.26
+[00:01:17.531] Processed: BPM=58.95
+[00:01:17.816] Processed: BPM=203.39
+[00:01:17.818] BPM sliding: 66.25 -> 67.68 (Target: 207.11)
+[00:01:18.045] Processed: BPM=222.22
+[00:01:18.047] BPM sliding: 127.43 -> 128.78 (Target: 233.35)
+[00:01:18.353] Processed: BPM=220.59
+[00:01:18.895] Processed: BPM=175.82
+[00:01:19.357] Processed: BPM=155.84
+[00:01:19.581] Processed: BPM=156.15
+[00:01:19.880] Processed: BPM=157.17
+[00:01:20.181] Processed: BPM=186.63
+[00:01:20.461] Processed: BPM=217.19
+[00:01:20.771] Processed: BPM=202.36
+[00:01:21.080] Processed: BPM=200.5
+[00:01:21.361] Processed: BPM=206.01
+[00:01:21.667] Processed: BPM=199.17
+[00:01:22.251] Processed: BPM=161.94
+[00:01:22.540] Processed: BPM=164.27
+[00:01:22.832] Processed: BPM=161.62
+[00:01:23.152] Processed: BPM=161.51
+[00:01:23.428] Processed: BPM=203.74
+[00:01:23.703] Processed: BPM=206.36
+[00:01:23.987] Processed: BPM=207.79
+[00:01:24.261] Processed: BPM=216.61
+[00:01:24.558] Processed: BPM=212.58
+[00:01:25.095] Processed: BPM=172.29
+[00:01:25.383] Processed: BPM=172.04
+[00:01:25.656] Processed: BPM=171.92
+[00:01:25.949] Processed: BPM=172.54
+[00:01:26.253] Processed: BPM=207.43
+[00:01:26.529] Processed: BPM=209.24
+[00:01:26.808] Processed: BPM=208.51
+[00:01:27.090] Processed: BPM=210.34
+[00:01:27.362] Processed: BPM=216.02
+[00:01:27.630] Processed: BPM=218.18
+[00:01:27.916] Processed: BPM=216.61
+[00:01:28.157] Processed: BPM=224.51
+[00:01:28.417] Processed: BPM=228.57
+[00:01:28.685] Processed: BPM=227.49
+[00:01:28.961] Processed: BPM=229.89
+[00:01:29.196] Processed: BPM=231.88
+[00:01:29.500] Processed: BPM=221.81
+[00:01:29.758] Processed: BPM=223.46
+[00:01:30.031] cruise_control: Locked at 224.6 BPM (StdDev: 4.95)
+[00:01:30.034] Processed: BPM=223.67
+[00:01:30.251] Processed: BPM=227.27
+[00:01:30.705] Processed: BPM=198.18
+[00:01:31.397] cruise_control: Disengaged (Avg: 190.6 vs Locked: 224.6)
+[00:01:31.400] Processed: BPM=146.25
+[00:01:31.571] Processed: BPM=156.05
+[00:01:31.827] Processed: BPM=152.09
+[00:01:32.125] Processed: BPM=169.01
+[00:01:32.412] Processed: BPM=236.69
+[00:01:32.653] Processed: BPM=221.81
+[00:01:32.930] Processed: BPM=217.59
+[00:01:33.139] Processed: BPM=236.92
+[00:01:33.400] Processed: BPM=243.41
+[00:01:33.627] Processed: BPM=247.17
+[00:01:33.877] Processed: BPM=253.7
+[00:01:34.264] Processed: BPM=213.14
+[00:01:34.559] Processed: BPM=206.72
+[00:01:34.814] Processed: BPM=202.19
+[00:01:35.627] Processed: BPM=137.06
+[00:01:39.209] Processed: BPM=48.54
+[00:01:39.430] Processed: BPM=49.28
+[00:01:39.707] Processed: BPM=49.02
+[00:01:50.799] Processed: BPM=15.82
+[00:01:51.045] Processed: BPM=20.29
+[00:01:51.291] Processed: BPM=20.23
+[00:01:59.789] Processed: BPM=11.95
+[00:02:00.040] Processed: BPM=25.97
+[00:02:00.315] Processed: BPM=25.88
+[00:02:05.221] Processed: BPM=17.23
+[00:02:05.743] Processed: BPM=40.32
+[00:02:16.995] Processed: BPM=14.16
+[00:02:29.508] Processed: BPM=8.22
+[00:02:43.543] Processed: BPM=6.26
+[00:02:48.755] Processed: BPM=5.58
+[00:02:49.109] Processed: BPM=7.47
+[00:02:49.359] Processed: BPM=12.09
+[00:02:49.659] Processed: BPM=39.23
+[00:02:49.933] Processed: BPM=203.39
+[00:02:49.936] BPM sliding: 35.96 -> 37.82 (Target: 209.79)
+[00:02:50.271] Processed: BPM=206.54
+[00:02:50.528] Processed: BPM=205.13
+[00:02:50.795] Processed: BPM=211.27
+[00:02:51.077] Processed: BPM=209.79
+[00:02:52.299] Processed: BPM=118.34
+[00:03:03.583] Processed: BPM=18.38
+[00:03:04.105] Processed: BPM=18.03
+[00:03:04.327] Processed: BPM=18.11
+[00:03:04.675] Processed: BPM=19.39
+[00:03:10.034] Processed: BPM=37.2
+[00:03:10.356] Processed: BPM=38.39
+[00:03:10.650] Processed: BPM=37.97
+[00:03:10.934] Processed: BPM=38.34
+[00:03:11.247] Processed: BPM=199.0
+[00:03:11.249] BPM sliding: 52.63 -> 56.03 (Target: 199.05)
+[00:03:11.490] Processed: BPM=211.45
+[00:03:11.493] BPM sliding: 120.59 -> 121.62 (Target: 215.70)
+[00:03:11.771] Processed: BPM=213.9
+[00:03:12.131] Processed: BPM=200.5
+[00:03:12.376] Processed: BPM=211.45
+[00:03:13.326] Processed: BPM=130.86
+[00:03:13.636] Processed: BPM=128.82
+[00:03:13.925] Processed: BPM=133.93
+[00:03:14.189] Processed: BPM=132.38
+[00:03:14.482] Processed: BPM=207.79
+[00:03:14.695] Processed: BPM=225.99
+[00:03:14.997] Processed: BPM=223.67
+[00:03:18.849] Processed: BPM=51.5
+[00:03:19.164] Processed: BPM=51.26
+[00:03:19.506] Processed: BPM=49.93
+[00:03:21.702] Processed: BPM=35.79
+[00:03:21.994] Processed: BPM=76.34
+[00:03:27.525] Processed: BPM=28.71
+[00:03:27.840] Processed: BPM=28.78
+[00:03:28.130] Processed: BPM=37.34
+[00:03:28.659] Processed: BPM=36.03
+[00:03:28.931] Processed: BPM=170.45
+[00:03:28.933] BPM sliding: 61.39 -> 62.52 (Target: 170.14)
+[00:03:29.220] Processed: BPM=174.04
+[00:03:29.441] Processed: BPM=183.07
+[00:03:29.699] Processed: BPM=229.67
+[00:03:29.931] Processed: BPM=240.0
+[00:03:30.201] Processed: BPM=244.65
+[00:03:30.775] Processed: BPM=179.78
+[00:03:31.008] Processed: BPM=183.49
+[00:03:31.262] Processed: BPM=180.32
+[00:03:31.544] Processed: BPM=178.7
+[00:03:31.918] Processed: BPM=209.97
+[00:03:32.291] Processed: BPM=186.92
+[00:03:32.818] Processed: BPM=154.34
+[00:03:32.953] Processed: BPM=170.21
+[00:03:33.220] Processed: BPM=184.47
+[00:03:33.608] Processed: BPM=182.37
+[00:03:33.945] Processed: BPM=212.95
+[00:03:34.232] Processed: BPM=187.94
+[00:03:34.502] Processed: BPM=187.06
+[00:03:34.734] Processed: BPM=213.71
+[00:03:35.004] Processed: BPM=227.27
+[00:03:35.243] Processed: BPM=237.15
+[00:03:35.517] Processed: BPM=236.69
+[00:03:35.804] Processed: BPM=224.09
+[00:03:36.057] Processed: BPM=227.27
+[00:03:36.489] Processed: BPM=192.62
+[00:03:36.727] Processed: BPM=199.34
+[00:03:36.980] Processed: BPM=203.91
+[00:03:37.991] Processed: BPM=124.1
+[00:03:38.238] Processed: BPM=137.38
+[00:03:38.500] Processed: BPM=134.83
+[00:03:38.702] Processed: BPM=139.37
+[00:03:38.929] Processed: BPM=256.14
+[00:03:38.931] BPM sliding: 158.43 -> 159.88 (Target: 260.93)
+[00:03:39.123] Processed: BPM=270.57
+[00:03:39.127] BPM sliding: 198.19 -> 199.44 (Target: 289.44)
+[00:03:39.434] Processed: BPM=258.06
+[00:03:39.713] Processed: BPM=237.39
+[00:03:40.023] Processed: BPM=218.98
+[00:03:40.311] Processed: BPM=202.36
+[00:03:40.603] Processed: BPM=204.6
+[00:03:40.888] Processed: BPM=204.08
+[00:03:41.183] Processed: BPM=207.43
+[00:03:41.448] Processed: BPM=210.71
+[00:03:41.735] Processed: BPM=212.39
+[00:03:42.038] Processed: BPM=209.06
+[00:03:42.307] Processed: BPM=212.77
+[00:03:42.593] cruise_control: Locked at 209.2 BPM (StdDev: 4.92)
+[00:03:42.596] Processed: BPM=209.24
+[00:03:42.884] Processed: BPM=209.42
+[00:03:43.152] Processed: BPM=215.25
+[00:03:43.419] Processed: BPM=216.22
+[00:03:43.692] Processed: BPM=219.38
+[00:03:43.964] cruise_control: Disengaged (Avg: 218.9 vs Locked: 209.2)
+[00:03:43.966] Processed: BPM=220.99
+[00:03:44.253] Processed: BPM=217.79
+[00:03:44.543] Processed: BPM=213.33
+[00:03:45.046] Processed: BPM=176.86
+[00:03:45.328] Processed: BPM=176.99
+[00:03:45.601] Processed: BPM=178.44
+[00:03:45.941] Processed: BPM=172.29
+[00:03:46.180] Processed: BPM=211.64
+[00:03:46.455] Processed: BPM=211.64
+[00:03:46.717] Processed: BPM=214.48
+[00:03:47.014] Processed: BPM=222.84
+[00:03:47.280] Processed: BPM=218.18
+[00:03:47.582] Processed: BPM=212.95
+[00:03:47.811] Processed: BPM=219.78
+[00:03:48.071] Processed: BPM=226.84
+[00:03:48.315] Processed: BPM=231.88
+[00:03:48.640] Processed: BPM=226.63
+[00:03:48.883] Processed: BPM=223.46
+[00:03:49.198] Processed: BPM=212.95
+[00:03:49.431] Processed: BPM=214.86
+[00:03:49.745] Processed: BPM=217.59
+[00:03:49.981] Processed: BPM=218.58
+[00:03:50.309] Processed: BPM=216.22
+[00:03:50.505] Processed: BPM=224.09
+[00:03:50.783] Processed: BPM=231.21
+[00:03:50.913] Processed: BPM=257.51
+[00:03:51.143] Processed: BPM=288.81
+[00:03:51.146] BPM sliding: 239.09 -> 240.25 (Target: 293.55)
+[00:03:51.418] Processed: BPM=262.3
+[00:03:51.804] Processed: BPM=235.53
+[00:03:51.973] Processed: BPM=226.42
+[00:03:52.258] Processed: BPM=214.86
+[00:03:52.466] Processed: BPM=229.45
+[00:04:12.427] Processed: BPM=11.64
+[00:04:16.909] Processed: BPM=9.63
+[00:04:17.333] Processed: BPM=9.57
+[00:04:17.709] Processed: BPM=9.51
+[00:04:18.135] Processed: BPM=42.02
+[00:04:18.497] Processed: BPM=151.32
+[00:04:18.500] BPM sliding: 37.40 -> 40.17 (Target: 154.70)
+[00:04:18.865] Processed: BPM=156.76
+[00:04:19.225] Processed: BPM=158.52
+[00:04:19.511] Processed: BPM=174.55
+[00:04:19.886] Processed: BPM=172.41
+[00:04:20.192] Processed: BPM=180.72
+[00:04:20.554] Processed: BPM=181.27
+[00:04:21.337] Processed: BPM=131.36
+[00:04:21.714] Processed: BPM=131.29
+[00:04:22.058] Processed: BPM=128.69
+[00:04:22.411] Processed: BPM=128.89
+[00:04:22.727] Processed: BPM=172.91
+[00:04:23.611] Processed: BPM=126.58
+[00:05:22.758] Processed: BPM=3.95
+[00:05:23.162] Processed: BPM=3.95
+[00:05:23.510] Processed: BPM=3.95
+[00:05:23.840] Processed: BPM=3.98
+[00:05:24.133] Processed: BPM=174.55
+[00:05:24.135] BPM sliding: 30.86 -> 33.08 (Target: 179.77)
+[00:05:24.149] BPM sliding: 36.86 -> 38.05 (Target: 179.77)
+[00:05:24.152] BPM sliding: 38.05 -> 39.25 (Target: 179.77)
+[00:05:24.456] Processed: BPM=185.19
+[00:05:24.746] Processed: BPM=194.02
+[00:05:25.093] Processed: BPM=191.54
+[00:05:25.387] Processed: BPM=191.24
+[00:05:25.726] Processed: BPM=188.98
+[00:05:26.034] Processed: BPM=186.48
+[00:05:26.364] Processed: BPM=188.98
+[00:05:26.687] Processed: BPM=184.62
+[00:05:26.987] Processed: BPM=191.08
+[00:05:27.283] cruise_control: Locked at 189.4 BPM (StdDev: 3.12)
+[00:05:27.286] Processed: BPM=191.85
+[00:05:27.598] Processed: BPM=194.33
+[00:05:27.893] Processed: BPM=199.0
+[00:05:28.234] Processed: BPM=191.69
+[00:05:28.535] Processed: BPM=192.46
+[00:05:28.871] Processed: BPM=188.53
+[00:05:29.171] Processed: BPM=187.79
+[00:05:29.496] Processed: BPM=190.33
+[00:05:29.781] Processed: BPM=193.24
+[00:05:30.087] Processed: BPM=198.35
+[00:05:30.393] Processed: BPM=196.88
+[00:05:30.710] cruise_control: Disengaged (Avg: 197.5 vs Locked: 189.4)
+[00:05:30.715] Processed: BPM=197.37
+[00:05:31.015] Processed: BPM=194.65
+[00:05:31.298] Processed: BPM=197.21
+[00:05:31.596] Processed: BPM=199.17
+[00:05:31.948] Processed: BPM=194.33
+[00:05:32.241] Processed: BPM=194.65
+[00:05:32.544] Processed: BPM=193.24
+[00:05:32.820] Processed: BPM=195.92
+[00:05:33.122] Processed: BPM=204.08
+[00:05:33.419] Processed: BPM=203.56
+[00:05:33.710] cruise_control: Locked at 198.2 BPM (StdDev: 4.48)
+[00:05:33.713] Processed: BPM=204.95
+[00:05:34.033] Processed: BPM=197.86
+[00:05:34.324] Processed: BPM=199.67
+[00:05:34.626] Processed: BPM=199.17
+[00:05:34.941] Processed: BPM=195.12
+[00:05:35.252] Processed: BPM=197.04
+[00:05:35.556] Processed: BPM=194.65
+[00:05:35.875] Processed: BPM=191.85
+[00:05:36.168] Processed: BPM=195.6
+[00:05:36.482] Processed: BPM=195.12
+[00:05:36.765] Processed: BPM=198.51
+[00:05:37.080] Processed: BPM=199.34
+[00:05:37.383] Processed: BPM=197.37
+[00:05:37.695] Processed: BPM=197.69
+[00:05:38.008] Processed: BPM=193.39
+[00:05:38.305] Processed: BPM=195.92
+[00:05:38.605] Processed: BPM=197.21
+[00:05:38.894] Processed: BPM=200.17
+[00:05:39.161] Processed: BPM=208.15
+[00:05:39.473] Processed: BPM=205.48
+[00:05:39.761] cruise_control: Disengaged (Avg: 206.8 vs Locked: 198.2)
+[00:05:39.763] Processed: BPM=206.72
+[00:05:40.061] Processed: BPM=205.3
+[00:05:40.353] Processed: BPM=201.01
+[00:05:40.669] Processed: BPM=200.84
+[00:05:40.969] Processed: BPM=198.84
+[00:05:41.303] Processed: BPM=193.86
+[00:05:41.571] Processed: BPM=197.21
+[00:05:41.900] Processed: BPM=194.65
+[00:05:42.190] Processed: BPM=196.72
+[00:05:42.495] Processed: BPM=201.17
+[00:05:42.770] cruise_control: Locked at 198.9 BPM (StdDev: 3.44)
+[00:05:42.773] Processed: BPM=199.83
+[00:05:43.071] Processed: BPM=205.3
+[00:05:43.346] Processed: BPM=207.61
+[00:05:43.673] Processed: BPM=203.74
+[00:05:43.971] Processed: BPM=200.33
+[00:05:44.271] Processed: BPM=199.67
+[00:05:44.547] Processed: BPM=200.0
+[00:05:44.846] Processed: BPM=204.43
+[00:05:45.126] Processed: BPM=207.79
+[00:05:45.400] cruise_control: Disengaged (Avg: 208.2 vs Locked: 198.9)
+[00:05:45.403] Processed: BPM=212.39
+[00:05:45.682] Processed: BPM=211.45
+[00:05:45.976] Processed: BPM=212.39
+[00:05:46.232] Processed: BPM=217.0
+[00:05:46.543] Processed: BPM=210.34
+[00:05:46.827] Processed: BPM=209.24
+[00:05:47.100] Processed: BPM=213.9
+[00:05:47.391] Processed: BPM=207.43
+[00:05:47.691] Processed: BPM=209.06
+[00:05:47.963] Processed: BPM=211.27
+[00:05:48.215] cruise_control: Locked at 211.6 BPM (StdDev: 2.86)
+[00:05:48.218] Processed: BPM=214.29
+[00:05:48.545] Processed: BPM=207.43
+[00:05:48.834] Processed: BPM=209.79
+[00:05:49.123] Processed: BPM=206.9
+[00:05:49.387] Processed: BPM=205.48
+[00:05:49.700] Processed: BPM=207.97
+[00:05:49.982] Processed: BPM=209.61
+[00:05:50.267] Processed: BPM=209.97
+[00:05:50.539] Processed: BPM=207.97
+[00:05:50.836] Processed: BPM=210.9
+[00:05:51.445] cruise_control: Disengaged (Avg: 194.2 vs Locked: 211.6)
+[00:05:51.447] Processed: BPM=163.6
+[00:05:51.719] Processed: BPM=165.29
+[00:05:52.013] Processed: BPM=162.93
+[00:05:52.295] Processed: BPM=164.72
+[00:05:52.601] Processed: BPM=208.33
+[00:05:52.871] Processed: BPM=208.33
+[00:05:53.171] Processed: BPM=207.25
+[00:05:53.461] Processed: BPM=205.48
+[00:05:53.750] Processed: BPM=208.51
+[00:05:54.007] Processed: BPM=211.27
+[00:05:54.323] Processed: BPM=208.33
+[00:05:54.599] Processed: BPM=211.08
+[00:05:54.867] Processed: BPM=215.25
+[00:05:55.139] cruise_control: Locked at 209.5 BPM (StdDev: 2.78)
+[00:05:55.141] Processed: BPM=211.64
+[00:05:55.404] Processed: BPM=222.22
+[00:05:55.633] Processed: BPM=232.11
+[00:05:55.888] cruise_control: Disengaged (Avg: 229.6 vs Locked: 209.5)
+[00:05:55.892] Processed: BPM=234.6
+[00:05:56.100] Processed: BPM=251.57
+[00:05:56.378] Processed: BPM=246.66
+[00:05:56.635] Processed: BPM=239.52
+[00:05:56.929] Processed: BPM=230.77
+[00:05:57.223] Processed: BPM=212.58
+[00:05:57.493] Processed: BPM=215.25
+[00:05:57.771] Processed: BPM=211.45
+[00:05:58.073] Processed: BPM=209.61
+[00:05:58.332] Processed: BPM=216.22
+[00:05:58.614] Processed: BPM=213.9
+[00:05:58.898] Processed: BPM=212.58
+[00:05:59.194] Processed: BPM=214.09
+[00:05:59.452] Processed: BPM=214.67
+[00:05:59.731] cruise_control: Locked at 213.4 BPM (StdDev: 1.93)
+[00:05:59.734] Processed: BPM=214.09
+[00:06:00.036] Processed: BPM=211.08
+[00:06:00.341] Processed: BPM=209.06
+[00:06:00.588] Processed: BPM=211.45
+[00:06:00.881] Processed: BPM=209.24
+[00:06:01.188] Processed: BPM=208.7
+[00:06:01.659] cruise_control: Disengaged (Avg: 199.9 vs Locked: 213.4)
+[00:06:01.664] Processed: BPM=181.82
+[00:06:02.161] Processed: BPM=152.28
+[00:06:02.636] Processed: BPM=136.83
+[00:06:03.111] Processed: BPM=124.87
+[00:06:03.533] Processed: BPM=128.21
+[00:06:04.003] Processed: BPM=130.51
+[00:06:04.464] Processed: BPM=131.36
+[00:06:04.868] Processed: BPM=136.36
+[00:06:05.322] Processed: BPM=134.76
+[00:06:05.755] Processed: BPM=136.75
+[00:06:06.177] Processed: BPM=139.86
+[00:06:06.612] cruise_control: Locked at 133.7 BPM (StdDev: 4.76)
+[00:06:06.613] Processed: BPM=137.54
+[00:06:07.071] Processed: BPM=136.67
+[00:06:07.522] Processed: BPM=135.98
+[00:06:07.975] Processed: BPM=133.48
+[00:06:08.395] Processed: BPM=134.76
+[00:06:08.856] Processed: BPM=134.53
+[00:06:09.278] Processed: BPM=136.67
+[00:06:09.722] Processed: BPM=137.54
+[00:06:10.113] Processed: BPM=139.62
+[00:06:10.549] Processed: BPM=141.51
+[00:06:10.941] cruise_control: Disengaged (Avg: 141.8 vs Locked: 133.7)
+[00:06:10.945] Processed: BPM=144.32
+[00:06:11.330] Processed: BPM=149.16
+[00:06:11.714] Processed: BPM=150.0
+[00:06:12.127] Processed: BPM=152.28
+[00:06:12.525] Processed: BPM=151.42
+[00:06:12.913] Processed: BPM=151.61
+[00:06:13.301] Processed: BPM=152.19
+[00:06:13.695] Processed: BPM=153.26
+[00:06:14.083] Processed: BPM=154.24
+[00:06:14.507] Processed: BPM=150.56
+[00:06:14.875] cruise_control: Locked at 151.6 BPM (StdDev: 1.50)
+[00:06:14.878] Processed: BPM=151.23
+[00:06:15.532] Processed: BPM=130.58
+[00:06:15.817] Processed: BPM=138.33
+[00:06:16.290] cruise_control: Disengaged (Avg: 134.5 vs Locked: 151.6)
+[00:06:16.293] Processed: BPM=134.53
+[00:06:16.753] Processed: BPM=127.93
+[00:06:17.141] Processed: BPM=149.07
+[00:06:17.534] Processed: BPM=139.94
+[00:06:17.909] Processed: BPM=148.61
+[00:06:18.255] Processed: BPM=160.11
+[00:06:18.598] Processed: BPM=164.84
+[00:06:18.953] Processed: BPM=168.9
+[00:06:19.318] Processed: BPM=170.21
+[00:06:19.671] Processed: BPM=169.49
+[00:06:20.029] Processed: BPM=167.83
+[00:06:20.346] Processed: BPM=172.29
+[00:06:20.689] Processed: BPM=174.8
+[00:06:21.025] Processed: BPM=177.25
+[00:06:21.388] Processed: BPM=176.34
+[00:06:21.694] cruise_control: Locked at 172.1 BPM (StdDev: 4.54)
+[00:06:21.697] Processed: BPM=178.57
+[00:06:22.057] Processed: BPM=175.44
+[00:06:22.400] Processed: BPM=174.42
+[00:06:22.743] Processed: BPM=177.12
+[00:06:23.089] Processed: BPM=171.8
+[00:06:23.455] Processed: BPM=171.55
+[00:06:23.803] Processed: BPM=170.82
+[00:06:24.170] Processed: BPM=168.18
+[00:06:24.520] Processed: BPM=167.6
+[00:06:24.877] Processed: BPM=169.13
+[00:06:25.223] Processed: BPM=169.25
+[00:06:25.552] Processed: BPM=173.79
+[00:06:25.886] Processed: BPM=175.57
+[00:06:26.227] Processed: BPM=177.51
+[00:06:26.584] Processed: BPM=176.6
+[00:06:26.923] Processed: BPM=175.44
+[00:06:27.270] Processed: BPM=173.54
+[00:06:27.612] Processed: BPM=173.54
+[00:06:27.954] Processed: BPM=174.8
+[00:06:28.298] Processed: BPM=174.04
+[00:06:28.630] Processed: BPM=176.6
+[00:06:28.983] Processed: BPM=174.8
+[00:06:29.322] Processed: BPM=175.18
+[00:06:29.643] Processed: BPM=178.7
+[00:06:29.958] Processed: BPM=180.32
+[00:06:30.300] cruise_control: Disengaged (Avg: 180.6 vs Locked: 172.1)
+[00:06:30.303] Processed: BPM=182.79
+[00:06:30.624] Processed: BPM=184.62
+[00:06:30.998] Processed: BPM=176.86
+[00:06:31.370] Processed: BPM=169.97

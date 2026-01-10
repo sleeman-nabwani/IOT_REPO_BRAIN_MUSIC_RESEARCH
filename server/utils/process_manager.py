@@ -74,6 +74,15 @@ class SubprocessManager:
             if random_simple_timeout is not None:
                 cmd.extend(["--random-simple-timeout", str(random_simple_timeout)])
         
+        if model_path:
+            cmd.extend(["--model-path", str(model_path)])
+        
+        # Startup mode parameters
+        if startup_mode == "walk_first":
+            cmd.append("--walk-first")
+            if walk_steps is not None:
+                cmd.extend(["--walk-steps", str(walk_steps)])
+        
         # Launch Process
         try:
             env = os.environ.copy()
@@ -154,6 +163,10 @@ class SubprocessManager:
                             if len(parts) == 3:
                                 self.gui_sync_callback(parts[1], parts[2])
                         except: pass
+                # Check for Notification messages
+                if line.startswith("NOTIFICATION:"):
+                    # Pass through with NOTIFICATION: prefix for GUI to handle
+                    self._log(line)
                     continue
 
                 if line == "EXIT_CLEAN":

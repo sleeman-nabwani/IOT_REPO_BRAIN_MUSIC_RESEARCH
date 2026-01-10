@@ -4,6 +4,7 @@ import datetime
 import time
 import sys
 import json
+from .paths import get_logs_dir
 
 def _format_elapsed(seconds: float) -> str:
     hours = int(seconds // 3600)
@@ -22,18 +23,20 @@ class Logger:
         stride: int | None = None,
         run_type: str | None = None,
     ):
-        self.start_time = time.time()
+        # Don't start timer yet - wait for first data point (when music actually starts)
+        self.start_time = None
+        self._timer_started = False
         self.timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         self.gui_callback = gui_callback
         if session_name and session_name.strip():
             # Sanitize name
             safe_name = "".join([c for c in session_name if c.isalnum() or c in (' ', '_', '-')]).strip()
             # logs/NAME/session_TIMESTAMP (Patient History)
-            self.parent_dir = Path(__file__).resolve().parent.parent / "logs" / safe_name
+            self.parent_dir = get_logs_dir() / safe_name
             self.path = self.parent_dir / f"session_{self.timestamp}"
         else:
             # logs/Default/session_TIMESTAMP
-            self.parent_dir = Path(__file__).resolve().parent.parent / "logs" / "Default"
+            self.parent_dir = get_logs_dir() / "Default"
             self.path = self.parent_dir / f"session_{self.timestamp}"
 
         #setting the path to the logs directory
@@ -58,11 +61,18 @@ class Logger:
     def _elapsed_str(self, timestamp: float | None = None) -> str:
         if timestamp is None:
             timestamp = time.time()
+        
+        # Start timer on first call (when session actually begins)
+        if not self._timer_started:
+            return _format_elapsed(0.0)
+        
         elapsed = max(0.0, timestamp - self.start_time)
         return _format_elapsed(elapsed)
 
     def log(self, message: str):
-        stamped = f"[{self._elapsed_str()}] {message}"
+        # Use current time for log messages
+        elapsed_str = self._elapsed_str()
+        stamped = f"[{elapsed_str}] {message}"
         with self.file_path.open("a", encoding="utf-8") as handle:
             handle.write(stamped + "\n")
         print(stamped)
@@ -74,6 +84,15 @@ class Logger:
             
     def log_data(
         self, timestamp: float, song_bpm: float, walking_bpm: float, step_event: bool = False, instant_bpm: float | None = None):
+        # Start timer on first data log (calibration or music start)
+        if not self._timer_started:
+            self.start_time = timestamp
+            self._timer_started = True
+            if song_bpm > 0:
+                self.log("Session timer started - music is now playing")
+            else:
+                self.log("Session timer started - calibration phase")
+        
         elapsed = self._elapsed_str(timestamp)
         ib = instant_bpm if step_event else ""
         with self.csv_path.open("a", newline="", encoding="utf-8") as handle:

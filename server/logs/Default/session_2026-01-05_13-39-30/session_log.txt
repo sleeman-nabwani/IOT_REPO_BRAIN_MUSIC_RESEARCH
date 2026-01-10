@@ -1,0 +1,15 @@
+Session log started at 2026-01-05_13-39-30 (t=0.000)
+[00:00:00.006] DEBUG: Attempting to initialize MidiBeatSync...
+[00:00:00.057] DEBUG: MidiBeatSync initialized successfully.
+[00:00:00.058] Starting in DYNAMIC MODE
+[00:00:00.058] Run type: hybrid
+[00:00:02.343] Prediction model enabled: lgbm_model.joblib
+[00:00:02.346] Session started
+[00:00:02.349] DEBUG: Attempting to open serial port COM3...
+[00:00:02.353] DEBUG: Serial port COM3 opened successfully.
+[00:00:02.854] Setting update stride to 1
+[00:00:02.956] Update stride set response: ACK,STRIDE,1
+[00:00:03.058] ACK,RESET received
+[00:00:03.162] ACK,START received
+[00:00:03.162] Session handshake completed
+[00:00:03.170] Running main loop...

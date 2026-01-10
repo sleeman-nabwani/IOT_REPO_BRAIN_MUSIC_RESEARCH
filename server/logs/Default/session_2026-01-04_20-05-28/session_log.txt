@@ -1,0 +1,158 @@
+Session log started at 2026-01-04_20-05-28 (t=0.000)
+[00:00:00.001] DEBUG: Attempting to initialize MidiBeatSync...
+[00:00:00.035] DEBUG: MidiBeatSync initialized successfully.
+[00:00:00.036] Starting in DYNAMIC MODE
+[00:00:00.036] Run type: dynamic
+[00:00:01.314] Prediction model enabled (LightGBM)
+[00:00:01.317] Session started
+[00:00:01.318] DEBUG: Attempting to open serial port COM3...
+[00:00:01.323] DEBUG: Serial port COM3 opened successfully.
+[00:00:01.824] Setting update stride to 1
+[00:00:01.926] Update stride set response: ACK,STRIDE,1
+[00:00:02.027] ACK,RESET received
+[00:00:02.130] ACK,START received
+[00:00:02.130] Session handshake completed
+[00:00:02.139] Running main loop...
+[00:00:04.045] Processed: BPM=80.0
+[00:00:04.792] Processed: BPM=80.54
+[00:00:05.154] Processed: BPM=108.11
+[00:00:05.530] Processed: BPM=121.54
+[00:00:05.883] Processed: BPM=165.9
+[00:00:05.886] BPM sliding: 87.35 -> 88.97 (Target: 167.68)
+[00:00:06.282] Processed: BPM=160.71
+[00:00:06.626] Processed: BPM=164.08
+[00:00:07.000] Processed: BPM=160.43
+[00:00:07.485] Processed: BPM=149.01
+[00:00:07.924] Processed: BPM=138.57
+[00:00:08.368] Processed: BPM=131.48
+[00:00:08.788] Processed: BPM=138.46
+[00:00:09.180] Processed: BPM=143.31
+[00:00:09.592] Processed: BPM=147.06
+[00:00:10.898] Processed: BPM=85.23
+[00:00:11.316] Processed: BPM=84.43
+[00:00:11.782] Processed: BPM=82.19
+[00:00:12.208] Processed: BPM=137.2
+[00:00:12.928] Processed: BPM=111.87
+[00:00:13.709] Processed: BPM=93.26
+[00:00:14.260] Processed: BPM=88.15
+[00:00:14.730] Processed: BPM=99.56
+[00:00:15.079] Processed: BPM=131.68
+[00:00:15.475] Processed: BPM=147.18
+[00:00:15.846] Processed: BPM=161.0
+[00:00:16.576] Processed: BPM=120.32
+[00:00:16.937] Processed: BPM=123.03
+[00:00:17.296] Processed: BPM=124.4
+[00:00:17.687] Processed: BPM=161.73
+[00:00:18.106] Processed: BPM=153.98
+[00:00:18.568] Processed: BPM=141.51
+[00:00:18.979] Processed: BPM=139.32
+[00:00:19.400] Processed: BPM=139.21
+[00:00:19.831] Processed: BPM=142.63
+[00:00:20.673] Processed: BPM=106.45
+[00:00:21.093] Processed: BPM=106.32
+[00:00:21.549] Processed: BPM=104.59
+[00:00:21.954] Processed: BPM=140.73
+[00:00:22.351] Processed: BPM=144.46
+[00:00:22.741] Processed: BPM=151.01
+[00:00:23.606] Processed: BPM=108.76
+[00:00:24.038] Processed: BPM=106.07
+[00:00:24.482] Processed: BPM=103.45
+[00:00:24.883] Processed: BPM=141.4
+[00:00:25.255] Processed: BPM=147.66
+[00:00:25.610] Processed: BPM=159.29
+[00:00:25.975] Processed: BPM=164.23
+[00:00:26.294] Processed: BPM=173.58
+[00:00:26.572] Processed: BPM=187.5
+[00:00:27.139] Processed: BPM=154.37
+[00:00:27.452] Processed: BPM=155.17
+[00:00:27.773] Processed: BPM=149.75
+[00:00:28.088] Processed: BPM=189.87
+[00:00:28.393] Processed: BPM=191.49
+[00:00:28.715] Processed: BPM=190.88
+[00:00:29.028] Processed: BPM=192.1
+[00:00:29.382] Processed: BPM=182.19
+[00:00:29.682] Processed: BPM=187.3
+[00:00:29.994] Processed: BPM=185.76
+[00:00:30.312] Processed: BPM=192.93
+[00:00:30.671] Processed: BPM=181.27
+[00:00:31.082] Processed: BPM=165.44
+[00:00:31.425] Processed: BPM=162.02
+[00:00:31.775] Processed: BPM=163.04
+[00:00:32.098] Processed: BPM=177.51
+[00:00:32.412] Processed: BPM=182.37
+[00:00:32.754] Processed: BPM=183.67
+[00:00:33.084] Processed: BPM=182.0
+[00:00:33.429] Processed: BPM=176.64
+[00:00:33.774] Processed: BPM=176.47
+[00:00:34.126] Processed: BPM=173.58
+[00:00:34.473] Processed: BPM=172.58
+[00:00:34.801] Processed: BPM=175.27
+[00:00:35.114] Processed: BPM=181.82
+[00:00:35.455] Processed: BPM=184.62
+[00:00:35.863] Processed: BPM=169.49
+[00:00:36.052] Processed: BPM=191.49
+[00:00:36.177] Processed: BPM=246.58
+[00:00:36.344] Processed: BPM=373.44
+[00:00:36.347] BPM sliding: 203.60 -> 205.35 (Target: 377.23)
+[00:00:36.607] Processed: BPM=326.09
+[00:00:36.891] Processed: BPM=255.32
+[00:00:37.027] Processed: BPM=264.32
+[00:00:37.262] Processed: BPM=273.14
+[00:00:37.541] Processed: BPM=274.39
+[00:00:37.809] Processed: BPM=229.89
+[00:00:38.195] Processed: BPM=193.55
+[00:00:38.443] Processed: BPM=199.34
+[00:00:38.678] Processed: BPM=207.37
+[00:00:38.901] Processed: BPM=254.96
+[00:00:39.093] Processed: BPM=276.5
+[00:00:39.313] Processed: BPM=285.26
+[00:00:39.693] Processed: BPM=226.7
+[00:00:40.269] Processed: BPM=153.45
+[00:00:40.442] Processed: BPM=158.87
+[00:00:40.626] Processed: BPM=193.34
+[00:00:40.806] Processed: BPM=332.72
+[00:00:40.808] BPM sliding: 216.92 -> 218.28 (Target: 330.38)
+[00:00:41.443] Processed: BPM=179.82
+[00:00:41.650] Processed: BPM=175.44
+[00:00:42.168] Processed: BPM=132.16
+[00:00:42.329] Processed: BPM=202.93
+[00:00:42.657] Processed: BPM=178.75
+[00:00:42.826] Processed: BPM=273.56
+[00:00:43.589] Processed: BPM=143.31
+[00:00:48.747] Processed: BPM=29.57
+[00:00:49.629] Processed: BPM=26.46
+[00:00:50.005] Processed: BPM=28.04
+[00:00:50.610] Processed: BPM=96.88
+[00:00:51.104] Processed: BPM=122.03
+[00:00:51.557] Processed: BPM=116.28
+[00:00:51.816] Processed: BPM=148.51
+[00:00:52.965] Processed: BPM=96.67
+[00:00:53.548] Processed: BPM=90.36
+[00:00:55.079] Processed: BPM=55.15
+[00:00:55.245] Processed: BPM=78.95
+[00:00:55.384] Processed: BPM=97.88
+[00:00:55.730] Processed: BPM=276.5
+[00:00:55.733] BPM sliding: 99.45 -> 101.20 (Target: 270.69)
+[00:00:56.045] Processed: BPM=228.14
+[00:00:56.318] Processed: BPM=192.93
+[00:00:56.608] Processed: BPM=205.71
+[00:00:56.872] Processed: BPM=215.05
+[00:00:57.178] Processed: BPM=209.55
+[00:00:57.460] Processed: BPM=210.77
+[00:00:57.694] Processed: BPM=218.45
+[00:00:57.983] Processed: BPM=225.28
+[00:00:58.231] Processed: BPM=234.07
+[00:00:58.535] Processed: BPM=214.54
+[00:00:58.837] Processed: BPM=210.04
+[00:00:59.136] Processed: BPM=198.46
+[00:01:00.339] Processed: BPM=208.33
+[00:01:00.592] Processed: BPM=219.24
+[00:01:00.885] Processed: BPM=221.4
+[00:01:01.142] Processed: BPM=223.33
+[00:01:01.387] Processed: BPM=226.42
+[00:01:01.661] Processed: BPM=232.56
+[00:01:01.938] Processed: BPM=227.56
+[00:01:02.209] Processed: BPM=218.45
+[00:01:02.494] Processed: BPM=216.61
+[00:01:02.915] Processed: BPM=183.67
+[00:01:03.102] Processed: BPM=201.79

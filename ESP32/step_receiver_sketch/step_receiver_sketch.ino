@@ -4,13 +4,16 @@
 
 // ==== SETTINGS ====
 int smoothingWindow = 3;  // Steps to average for BPM (changeable via serial)
-int updateStride = 1; // Update BPM every N steps (changeable via serial)
+int updateStride = 1;     // Update BPM every N steps (changeable via serial)
 const int TIMEOUT_MS = 10000;     // Reset BPM if no steps for 3 seconds
 bool sessionStarted = false;
 bool sessionStarting = true;
 uint32_t sessionStartTime = 0;
 int stepCounter = 0;
 float lastCalculatedBPM = 0.0;
+
+// Sender MAC (ESP32 on foot sensors). TODO: set to the actual sender MAC.
+uint8_t senderMac[] = {0xfc, 0xb4, 0x67, 0xf4, 0x5f, 0x68};
 
 // ---------------- STRUCTS ----------------
 
@@ -21,7 +24,7 @@ typedef struct __attribute__((packed)) {
 } StepEvent;
 
 // Identifying packet type enum:
-enum MsgType : uint8_t { MSG_STEP = 1, MSG_BPM_DELTA = 2 };
+enum MsgType : uint8_t { MSG_STEP = 1, MSG_BPM_DELTA = 2, MSG_CMD = 3 };
 
 // Unified packet (step + button delta):
 typedef struct __attribute__((packed)) {
@@ -34,8 +37,15 @@ typedef struct __attribute__((packed)) {
     struct __attribute__((packed)) { 
       int8_t delta;
     } bpm;
+    struct __attribute__((packed)) {
+      uint8_t cmd;
+      int16_t arg;
+    } ctrl;
   };
 } Packet;
+
+// Control codes
+const uint8_t CMD_CAL_WEIGHT = 1;
 
 // ---------------- CIRCULAR BUFFER CLASS ----------------
 #define MAX_WINDOW_SIZE 20
@@ -215,13 +225,26 @@ void onDataRecv(const uint8_t * mac, const uint8_t *incomingData, int len) {
       currentStep.footId = p.step.footId;
       lastMsgType  = MSG_STEP;
       messageRecv = true;
+      return;
     }
-    else if(p.type == MSG_BPM_DELTA){
+    if(p.type == MSG_BPM_DELTA){
       lastDelta = p.bpm.delta;
       lastMsgType = MSG_BPM_DELTA;
       messageRecv = true;
+      return;
     }
-    return;
+    if(p.type == MSG_CMD){
+      // Handle control ACK/ERR immediately and forward to PC
+      if (p.ctrl.cmd == CMD_CAL_WEIGHT) {
+        if (p.ctrl.arg >= 0) {
+          Serial.print("ACK,CAL_WEIGHT,");
+          Serial.println((int)p.ctrl.arg);
+        } else {
+          Serial.println("ERR,CAL_WEIGHT");
+        }
+      }
+      return;
+    }
   }
   // Fallback for raw StepEvent (legacy support if needed, but risky if size matches Packet)
   if(len == (int)sizeof(StepEvent)){
@@ -249,57 +272,94 @@ void setup() {
   esp_now_register_recv_cb(onDataRecv);
 }
 
+// ---------------- CONTROL SENDER ----------------
+bool sendControl(uint8_t cmd, int16_t arg) {
+  Packet p{};
+  p.type = MSG_CMD;
+  p.ctrl.cmd = cmd;
+  p.ctrl.arg = arg;
+  return esp_now_send(senderMac, (uint8_t*)&p, sizeof(Packet)) == ESP_OK;
+}
+
+// ---------------- SERIAL COMMAND HANDLERS ----------------
+void handleReset(unsigned long now) {
+  sessionStarting = true;
+  Serial.println("ACK,RESET");
+}
+
+void handleStart(unsigned long now) {
+  if (!sessionStarting) return;
+  stepHistory.clear();
+  sessionStarting = false;
+  sessionStarted = true;
+  sessionStartTime = now;
+  stepCounter = 0;
+  lastCalculatedBPM = 0.0;
+  Serial.println("ACK,START");
+}
+
+void handleSetWindow(const String& command) {
+  int commaIndex = command.indexOf(',');
+  if (commaIndex == -1) return;
+  int val = command.substring(commaIndex + 1).toInt();
+  if (val > 0 && val <= 20) { 
+    smoothingWindow = val;
+    if (updateStride > smoothingWindow) 
+      updateStride = smoothingWindow;
+    stepHistory.trimToSize(smoothingWindow);
+    Serial.print("ACK,WINDOW,");
+    Serial.println(smoothingWindow);
+  }
+}
+
+void handleSetStride(const String& command) {
+  int commaIndex = command.indexOf(',');
+  if (commaIndex == -1) return;
+  int val = command.substring(commaIndex + 1).toInt();
+  if (val > 0 && val <= smoothingWindow) {
+    updateStride = val;
+    Serial.print("ACK,STRIDE,");
+    Serial.println(updateStride);
+  }
+}
+
+void handleCalibrateWeight(const String& command) {
+  int margin = 150; // default margin
+  int commaIndex = command.indexOf(',');
+  if (commaIndex != -1) {
+    margin = command.substring(commaIndex + 1).toInt();
+    if (margin <= 0) margin = 150;
+  }
+  bool ok = sendControl(CMD_CAL_WEIGHT, (int16_t)margin);
+  Serial.println(ok ? "ACK,CAL_WEIGHT" : "ERR,CAL_WEIGHT");
+}
+
+void processSerialCommands(unsigned long now) {
+  while (Serial.available()) {
+    String command = Serial.readStringUntil('\n');
+    command.trim();
+    if (command == "RESET") {
+      handleReset(now);
+    } else if (command == "START") {
+      handleStart(now);
+    } else if (command.startsWith("SET_WINDOW,")) {
+      handleSetWindow(command);
+    } else if (command.startsWith("SET_STRIDE,")) {
+      handleSetStride(command);
+    } else if (command.startsWith("CAL_WEIGHT")) {
+      handleCalibrateWeight(command);
+      // Immediately ACK to PC that request was dispatched to sender
+      Serial.println("ACK,CAL_WEIGHT,DISPATCHED");
+    }
+  }
+}
+
 
 // ---------------- LOOP ---------------- 
 void loop() {
   unsigned long now = millis();
   
-  // Process all pending commands from PC
-  while (Serial.available()) {
-    String command = Serial.readStringUntil('\n');
-    command.trim();
-    //if the command is RESET(to make the esp listen for starting command):
-    if (command == "RESET") {
-      sessionStarting = true;
-      Serial.println("ACK,RESET");
-    //if the command is START(to start a new session):
-    } else if (command == "START" && sessionStarting) {
-      stepHistory.clear();
-      // clearList(); // Legacy
-      sessionStarting = false;
-      sessionStarted = true;
-      sessionStartTime = now;
-      stepCounter = 0;
-      lastCalculatedBPM = 0.0;
-      Serial.println("ACK,START");
-    } else if (command.startsWith("SET_WINDOW,")) {
-      int commaIndex = command.indexOf(',');
-      if (commaIndex != -1) {
-        String valStr = command.substring(commaIndex + 1);
-        int val = valStr.toInt();
-        if (val > 0 && val <= 20) { 
-          smoothingWindow = val;
-          if (updateStride > smoothingWindow) 
-            updateStride = smoothingWindow;
-           // Trim immediately if needed
-           stepHistory.trimToSize(smoothingWindow);
-          Serial.print("ACK,WINDOW,");
-          Serial.println(smoothingWindow);
-        }
-      }
-    } else if (command.startsWith("SET_STRIDE,")) {
-      int commaIndex = command.indexOf(',');
-      if (commaIndex != -1) {
-        String valStr = command.substring(commaIndex + 1);
-        int val = valStr.toInt();
-        if (val > 0 && val <= smoothingWindow) {
-          updateStride = val;
-          Serial.print("ACK,STRIDE,");
-          Serial.println(updateStride);
-        }
-      }
-    }
-  }
+  processSerialCommands(now);
   // If a step is received:
   if (messageRecv) {
     
