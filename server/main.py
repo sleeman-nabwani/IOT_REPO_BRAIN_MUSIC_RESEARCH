@@ -99,10 +99,80 @@ def parse_args() -> argparse.Namespace:
         help="Enable hybrid mode (starts dynamic, locks if steady)",
     )
     parser.add_argument(
+        "--random",
+        action="store_true",
+        help="Enable Random Drift Mode",
+    )
+    parser.add_argument(
+        "--random-span",
+        type=float,
+        default=0.20,
+        help="Difficulty span for Random Mode (0.0-0.5)",
+    )
+    parser.add_argument(
+        "--random-gamified",
+        type=int,
+        default=0,
+        help="Enable gamified (time-based) random mode (1=True, 0=False)",
+    )
+    parser.add_argument(
+        "--random-simple-threshold",
+        type=float,
+        default=5.0,
+        help="BPM spread to match in simple mode",
+    )
+    parser.add_argument(
+        "--random-simple-steps",
+        type=int,
+        default=20,
+        help="Consecutive steps to match in simple mode",
+    )
+    parser.add_argument(
+        "--random-simple-timeout",
+        type=float,
+        default=30.0,
+        help="Timeout (seconds) to fallback in simple mode",
+    )
+    parser.add_argument(
+        "--hybrid-lock-steps",
+        type=int,
+        default=5,
+        help="Steps needed to lock in hybrid mode",
+    )
+    parser.add_argument(
+        "--hybrid-unlock-time",
+        type=float,
+        default=1.5,
+        help="Seconds of deviation to unlock in hybrid mode",
+    )
+    parser.add_argument(
+        "--hybrid-stability-threshold",
+        type=float,
+        default=3.0,
+        help="BPM spread to consider stable in hybrid mode",
+    )
+    parser.add_argument(
+        "--hybrid-unlock-threshold",
+        type=float,
+        default=15.0,
+        help="BPM deviation to trigger unlock in hybrid mode",
+    )
+    parser.add_argument(
         "--calibrate-weight",
         type=int,
         default=None,
         help="Run weight calibration only (provide margin), then exit",
+    )
+    parser.add_argument(
+        "--walk-first",
+        action="store_true",
+        help="Wait for user to walk N steps before starting music",
+    )
+    parser.add_argument(
+        "--walk-steps",
+        type=int,
+        default=10,
+        help="Number of steps to collect before starting music in walk-first mode (default: 10)",
     )
     return parser.parse_args()
 
@@ -121,11 +191,85 @@ def start_stdin_listener(command_queue):
     t = threading.Thread(target=_listen, daemon=True)
     t.start()
 
+def _notify(status_callback, message):
+    """Send notification to GUI and log."""
+    status_callback(message)
+    print(f"NOTIFICATION:{message}")
+    sys.stdout.flush()
+
+def _collect_calibration_steps(ser, player, logger, status_callback, stop_event, num_steps):
+    """Collect calibration steps and return list of BPMs."""
+    logger.log(f"WALK-FIRST MODE: Collecting {num_steps} calibration steps...")
+    _notify(status_callback, f"Please begin walking. Collecting {num_steps} steps...")
+    
+    bpms = []
+    ser.timeout = 0.2
+    
+    while len(bpms) < num_steps:
+        if stop_event and stop_event.is_set():
+            logger.log("Session stopped during calibration.")
+            return None
+            
+        if raw_line := ser.readline():
+            try:
+                bpm, instant_bpm, _, _ = handle_step(raw_line, player.walkingBPM)
+                bpms.append(bpm)
+                logger.log_data(time.time(), 0, bpm, step_event=True, instant_bpm=instant_bpm)
+                logger.log(f"Calibration step {len(bpms)}/{num_steps}: {bpm:.1f} BPM")
+                status_callback(f"Calibrating... {len(bpms)}/{num_steps} steps")
+            except ValueError:
+                continue
+    
+    return bpms
+
+def handle_startup_mode(args, ser, player, logger, bpm_estimation, status_callback, stop_event):
+    """Handle startup: walk-first (calibrate then play) or music-first (play immediately)."""
+    
+    if getattr(args, 'walk_first', False):
+        # Calibrate from walking steps
+        bpms = _collect_calibration_steps(ser, player, logger, status_callback, stop_event, 
+                                          getattr(args, 'walk_steps', 10))
+        if not bpms:
+            return False
+        
+        # Start music at calibrated BPM
+        avg_bpm = sum(bpms) / len(bpms)
+        player.set_BPM(avg_bpm)
+        player.start()
+        logger.log(f"Calibration complete. Starting music at {avg_bpm:.1f} BPM")
+        
+        # Pre-fill prediction model and seed graph data
+        for bpm in bpms:
+            bpm_estimation.register_step(bpm, bpm)
+        logger.log_data(time.time(), player.walkingBPM, avg_bpm, step_event=False)
+        
+        _notify(status_callback, "Music started! Continue walking.")
+    else:
+        # Start music immediately at default BPM
+        player.start()
+        logger.log("Running main loop...")
+        
+        # Seed initial GUI data so graph starts immediately
+        logger.log_data(time.time(), player.walkingBPM, player.walkingBPM, step_event=False)
+        
+        _notify(status_callback, "System ready - Please begin walking!")
+    
+    ser.timeout = 0  # Non-blocking for main loop
+    return True
+
 def main(args, status_callback=print, stop_event=None, session_dir_callback=None, command_queue=None):
     midi_path = args.midi_path
     smoothing_window = getattr(args, 'smoothing', 3)
     stride = getattr(args, 'stride', 1)
-    run_type = "manual" if args.manual else ("hybrid" if getattr(args, "hybrid", False) else "dynamic")
+    
+    if args.manual:
+        run_type = "manual"
+    elif getattr(args, "hybrid", False):
+        run_type = "hybrid"
+    elif getattr(args, "random", False):
+        run_type = "random"
+    else:
+        run_type = "dynamic"
 
     # Calibration-only flow: open serial, send CAL_WEIGHT, and exit.
     if getattr(args, "calibrate_weight", None) is not None:
@@ -172,12 +316,6 @@ def main(args, status_callback=print, stop_event=None, session_dir_callback=None
         sys.stdout.flush()
         return None, logger, None
     
-    # Seed initial GUI data so song BPM appears immediately
-    try:
-        logger.log_data(time.time(), player.walkingBPM, player.walkingBPM, step_event=False)
-    except Exception:
-        pass
-    
     # 3. Log Mode
     if args.manual:
         logger.log("Starting in MANUAL MODE.")
@@ -186,6 +324,8 @@ def main(args, status_callback=print, stop_event=None, session_dir_callback=None
             player.set_BPM(args.bpm)
         else:
             logger.log(f"Using default song BPM: {player.songBPM}")
+    elif getattr(args, "random", False):
+        logger.log("Starting in RANDOM DRIFT MODE.")
     else:
         logger.log("Starting in DYNAMIC MODE")
     logger.log(f"Run type: {run_type}")
@@ -204,13 +344,18 @@ def main(args, status_callback=print, stop_event=None, session_dir_callback=None
     bpm_estimation = BPM_estimation(
         player,
         logger,
-        manual_mode=args.manual,
+        initial_mode=run_type,
         manual_bpm=args.bpm,
         prediction_model=prediction_model,
-        smoothing_window=smoothing_window,
-        stride=stride,
-        run_type=run_type,
-        hybrid_mode=getattr(args, 'hybrid', False),
+        random_span=args.random_span,
+        random_gamified=(args.random_gamified == 1),
+        hybrid_lock_steps=args.hybrid_lock_steps,
+        hybrid_unlock_time=args.hybrid_unlock_time,
+        hybrid_stability_threshold=args.hybrid_stability_threshold,
+        hybrid_unlock_threshold=args.hybrid_unlock_threshold,
+        random_simple_threshold=args.random_simple_threshold,
+        random_simple_steps=args.random_simple_steps,
+        random_simple_timeout=args.random_simple_timeout,
     )
     if args.alpha_up is not None:
         bpm_estimation.set_smoothing_alpha_up(args.alpha_up)
@@ -236,9 +381,13 @@ def main(args, status_callback=print, stop_event=None, session_dir_callback=None
     # runtime serial reads should be non-blocking to avoid slowing playback
     ser.timeout = 0
     
-    # start playback after handshake (threaded player handles timing)
-    player.start()
-    logger.log("Running main loop...")
+    # ------------------------------------------------------------------
+    # STARTUP MODE: Walk-First vs Music-First
+    # ------------------------------------------------------------------
+    startup_success = handle_startup_mode(args, ser, player, logger, bpm_estimation, status_callback, stop_event)
+    if not startup_success:
+        if ser: ser.close()
+        return player, logger, bpm_estimation
     
     # ------------------------------------------------------------------
     # STDIN LISTENER (For Subprocess Mode)

@@ -12,6 +12,7 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
 # --- Mock imports for context ---
 try:
+    from utils.paths import get_logs_dir, get_models_dir, get_plots_dir, get_midi_dir, get_research_dir, get_app_root
     from utils.plotter import _elapsed_to_seconds, LivePlotter, generate_post_session_plot
     from utils.process_manager import SubprocessManager
     from utils.comms import send_calibration_command
@@ -130,6 +131,10 @@ class GuiApp:
                        foreground="white", borderwidth=0, padding=(20, 14))
         style.map("Success.TButton", background=[("active", "#059669"), ("disabled", "#3b3f5c")])
         
+        style.configure("Info.TButton", font=("Segoe UI", 11, "bold"), background="#3b82f6", 
+                       foreground="white", borderwidth=0, padding=(20, 14))
+        style.map("Info.TButton", background=[("active", "#2563eb"), ("disabled", "#3b3f5c")])
+        
         style.configure("Compact.TButton", background=self.P["input_bg"], foreground=self.P["text_input"], 
                        borderwidth=0, padding=(10, 6), font=("Segoe UI", 9))
         style.map("Compact.TButton", background=[("active", "#e5e7eb")])
@@ -245,8 +250,8 @@ class GuiApp:
                        arrowsize=0,
                        relief="flat")
 
-        base_dir = Path(__file__).resolve().parent.parent
-        default_midi = base_dir / "midi_files" / "Technion_March1.mid"
+        base_dir = get_midi_dir()
+        default_midi = base_dir / "Technion_March1.mid"
         
         self.session_thread = None
         self.status_queue = SimpleQueue()
@@ -271,9 +276,21 @@ class GuiApp:
         self.job_ports = None
         
         self.port_scan_thread = None
-
-
-        self.port_scan_thread = None
+        
+        # Registry for scrollable canvases (for smart mousewheel routing)
+        self.scrollable_canvases = []
+        
+        # Initialize mode-specific variables (created properly in Mode Settings tab later)
+        self.random_span_display_var = tk.DoubleVar(value=20.0)
+        self.rnd_val_str = tk.StringVar(value="20")
+        self.gamify_var = tk.BooleanVar(value=False)
+        self.random_simple_threshold_var = tk.StringVar(value="5.0")
+        self.random_simple_steps_var = tk.StringVar(value="20")
+        self.random_simple_timeout_var = tk.StringVar(value="30.0")
+        self.hybrid_lock_var = tk.StringVar(value="5")
+        self.hybrid_unlock_var = tk.StringVar(value="1.5")
+        self.hybrid_stability_var = tk.StringVar(value="3.0")
+        self.hybrid_unlock_thres_var = tk.StringVar(value="5.0")
 
     # --- LAYOUT ---
         # Enhanced navbar with gradient-like effect
@@ -349,12 +366,8 @@ class GuiApp:
         self.canvas_sidebar.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
         
-        # Mousewheel Binding (Windows/Linux)
-        def _on_mousewheel(event):
-            self.canvas_sidebar.yview_scroll(int(-1*(event.delta/120)), "units")
-        
-        # Bind mousewheel only when hovering over sidebar
-        self.canvas_sidebar.bind_all("<MouseWheel>", _on_mousewheel)
+        # Register this canvas for smart mousewheel routing
+        self.scrollable_canvases.append(('sidebar', self.canvas_sidebar, sidebar))
         
         # Fix width of inner frame to match canvas
         def _configure_canvas(event):
@@ -415,6 +428,8 @@ class GuiApp:
                        variable=self.mode_var, command=self.on_mode_change).pack(anchor="w", pady=6)
         ttk.Radiobutton(mode_container, text="🚀  Hybrid Mode", value="hybrid", 
                        variable=self.mode_var, command=self.on_mode_change).pack(anchor="w", pady=6)
+        ttk.Radiobutton(mode_container, text="🎲  Random Mode", value="random", 
+                       variable=self.mode_var, command=self.on_mode_change).pack(anchor="w", pady=6)
         ttk.Radiobutton(mode_container, text="🛠  Manual Override", value="manual", 
                        variable=self.mode_var, command=self.on_mode_change).pack(anchor="w", pady=6)
         
@@ -444,86 +459,40 @@ class GuiApp:
         self.subject_var = tk.StringVar()
         self.session_var = tk.StringVar()
         
-        # --- ADVANCED SETTINGS (COLLAPSIBLE) ---
-        self.advanced_pane = CollapsiblePane(sidebar, title="Advanced Settings", expanded=False)
-        self.advanced_pane.pack(fill="x", pady=(15, 0), anchor="w")
+        # --- STARTUP MODE ---
+        section("Startup Mode")
+        startup_container = ttk.Frame(sidebar, style="Card.TFrame")
+        startup_container.pack(fill="x", pady=(0, 5))
         
-        # Re-parent controls to [self.advanced_pane.content_frame] instead of [sidebar]
-        adv_parent = self.advanced_pane.content_frame
+        self.startup_mode_var = tk.StringVar(value="music_first")
+        ttk.Radiobutton(startup_container, text="🎵  Music First (Default BPM)", 
+                       value="music_first", variable=self.startup_mode_var,
+                       command=self.on_startup_mode_change).pack(anchor="w", pady=6)
+        ttk.Radiobutton(startup_container, text="🚶  Walk First (Detected BPM)", 
+                       value="walk_first", variable=self.startup_mode_var,
+                       command=self.on_startup_mode_change).pack(anchor="w", pady=6)
         
-        # SMOOTHING CONTROL (Climbing & Cascading)
-        ttk.Label(adv_parent, text="Climbing (Speed Up)", style="CardLabel.TLabel", 
-                 font=("Segoe UI", 9, "bold")).pack(anchor="w", pady=(5, 2))
+        # Walk steps count input (only shown when walk_first is selected)
+        self.walk_steps_frame = ttk.Frame(sidebar, style="Card.TFrame")
+        walk_steps_row = ttk.Frame(self.walk_steps_frame, style="Card.TFrame")
+        walk_steps_row.pack(fill="x", pady=(5, 0))
         
-        attack_row = ttk.Frame(adv_parent, style="Card.TFrame")
-        attack_row.pack(fill="x", pady=(0, 10))
+        ttk.Label(walk_steps_row, text="Calibration Steps:", 
+                 style="CardLabel.TLabel", font=("Segoe UI", 9)).pack(side="left", padx=(10, 5))
+        self.walk_steps_var = tk.StringVar(value="10")
+        ttk.Entry(walk_steps_row, textvariable=self.walk_steps_var, 
+                 width=8, font=("Segoe UI", 10)).pack(side="left", padx=(0, 5))
+        ttk.Label(walk_steps_row, text="steps", 
+                 style="CardLabel.TLabel", font=("Segoe UI", 9)).pack(side="left")
+        # Initially hidden
         
-        self.smoothing_up_var = tk.StringVar() 
-        entry_up = ttk.Entry(attack_row, textvariable=self.smoothing_up_var, width=15, font=("Segoe UI", 10))
-        entry_up.pack(side="left", padx=(0, 5))
-        self._bind_placeholder(entry_up, self.smoothing_up_var, "Default")
-        
-        ttk.Button(attack_row, text="?", style="Help.TButton", width=2, command=self.show_attack_help).pack(side="left", padx=5)
-
-        # Cascading
-        ttk.Label(adv_parent, text="Cascading (Slow Down)", style="CardLabel.TLabel", 
-                 font=("Segoe UI", 9, "bold")).pack(anchor="w", pady=(5, 2))
-        
-        decay_row = ttk.Frame(adv_parent, style="Card.TFrame")
-        decay_row.pack(fill="x", pady=(0, 10))
-        
-        self.smoothing_down_var = tk.StringVar()
-        entry_down = ttk.Entry(decay_row, textvariable=self.smoothing_down_var, width=15, font=("Segoe UI", 10))
-        entry_down.pack(side="left", padx=(0, 5))
-        self._bind_placeholder(entry_down, self.smoothing_down_var, "Default")
-
-        ttk.Button(decay_row, text="?", style="Help.TButton", width=2, command=self.show_decay_help).pack(side="left", padx=5)
-
-        # STEP AVERAGING WINDOW
-        ttk.Label(adv_parent, text="Smoothing Window", style="CardLabel.TLabel", 
-                 font=("Segoe UI", 9, "bold")).pack(anchor="w", pady=(5, 2))
-        window_row = ttk.Frame(adv_parent, style="Card.TFrame")
-        window_row.pack(fill="x", pady=(0, 10))
-        
-        self.step_window_var = tk.StringVar()
-        entry_win = ttk.Entry(window_row, textvariable=self.step_window_var, width=12, font=("Segoe UI", 10))
-        entry_win.pack(side="left", padx=(0, 5))
-        self._bind_placeholder(entry_win, self.step_window_var, "Default")
-        ttk.Label(window_row, text="Steps", style="CardLabel.TLabel", font=("Segoe UI", 9)).pack(side="left", padx=(0, 5))
-        ttk.Button(window_row, text="?", style="Help.TButton", width=2, command=self.show_window_help).pack(side="left")
-
-        # STRIDE CONFIG 
-        ttk.Label(adv_parent, text="Update Stride", style="CardLabel.TLabel", 
-                 font=("Segoe UI", 9, "bold")).pack(anchor="w", pady=(5, 2))
-        stride_row = ttk.Frame(adv_parent, style="Card.TFrame")
-        stride_row.pack(fill="x", pady=(0, 10))
-        self.stride_var = tk.StringVar()
-        entry_stride = ttk.Entry(stride_row, textvariable=self.stride_var, width=12, font=("Segoe UI", 10))
-        entry_stride.pack(side="left", padx=(0, 5))
-        self._bind_placeholder(entry_stride, self.stride_var, "Default")
-        ttk.Label(stride_row, text="Steps", style="CardLabel.TLabel", font=("Segoe UI", 9)).pack(side="left", padx=(0, 5))
-        ttk.Button(stride_row, text="?", style="Help.TButton", width=2, command=self.show_stride_help).pack(side="left")
-
-        # PREDICTION MODEL SELECTOR
-        ttk.Label(adv_parent, text="Prediction Model", style="CardLabel.TLabel", 
-                 font=("Segoe UI", 9, "bold")).pack(anchor="w", pady=(5, 2))
-        model_row = ttk.Frame(adv_parent, style="Card.TFrame")
-        model_row.pack(fill="x", pady=(0, 10))
-        self.model_var = tk.StringVar(value="Base Model")
-        self.model_combo = ttk.Combobox(model_row, textvariable=self.model_var, state="readonly", width=22, 
-                                       font=("Segoe UI", 9))
-        self.model_combo.pack(side="left", padx=(0, 5))
-        ttk.Button(model_row, text="↻", style="Compact.TButton", width=3, command=self._refresh_model_list).pack(side="left")
-        self._refresh_model_list()  # Populate on init
-        
-        # Weight Calibration
-        ttk.Label(adv_parent, text="Calibration Margin", style="CardLabel.TLabel", 
-                 font=("Segoe UI", 9, "bold")).pack(anchor="w", pady=(5, 2))
-        cali_frame = ttk.Frame(adv_parent, style="Card.TFrame")
-        cali_frame.pack(fill="x", pady=(0, 5))
-        self.cal_margin_var = tk.StringVar(value="200")
-        ttk.Entry(cali_frame, textvariable=self.cal_margin_var, width=12, font=("Segoe UI", 10)).pack(side="left", padx=(0, 5))
-        ttk.Label(cali_frame, text="Units", style="CardLabel.TLabel", font=("Segoe UI", 9)).pack(side="left")
+        # --- INFO ABOUT MODE SETTINGS TAB ---
+        info_frame = ttk.Frame(sidebar, style="Card.TFrame", padding=10)
+        info_frame.pack(fill="x", pady=(15, 0))
+        ttk.Label(info_frame, text="💡 Tip:", style="CardLabel.TLabel", 
+                 font=("Segoe UI", 9, "bold"), foreground=self.P["accent"]).pack(anchor="w")
+        ttk.Label(info_frame, text="Advanced mode settings\n(Random, Hybrid, etc.) can be\nconfigured in the Mode Settings tab", 
+                 style="CardSub.TLabel", font=("Segoe UI", 8)).pack(anchor="w", pady=(5, 0))
         
         # --- BOTTOM CONTROLS ---
         ttk.Frame(sidebar, style="Card.TFrame").pack(fill="both", expand=True) # Spacer pushes everything down
@@ -632,6 +601,19 @@ class GuiApp:
         canvas_widget = self.canvas.get_tk_widget()
         canvas_widget.configure(borderwidth=0, highlightthickness=0, relief="flat")
         canvas_widget.pack(fill="both", expand=True)
+        
+        # Notification Label (Top-right overlay) - Initially hidden
+        self.notification_label = tk.Label(
+            tab_session, 
+            text="",
+            font=("Segoe UI", 11, "bold"),
+            fg="white",
+            bg=self.P["warning"],
+            padx=15,
+            pady=10,
+            relief="solid",
+            borderwidth=2
+        )
 
         # -------------------- TAB 2: MODEL TRAINING --------------------
         tab_training = ttk.Frame(self.main_notebook, style="TFrame")
@@ -642,6 +624,11 @@ class GuiApp:
         tab_analysis = ttk.Frame(self.main_notebook, style="TFrame")
         self.main_notebook.add(tab_analysis, text="  📊  Analysis  ")
         self._build_analysis_tab(tab_analysis)
+
+        # -------------------- TAB 4: MODE SETTINGS --------------------
+        tab_mode_settings = ttk.Frame(self.main_notebook, style="TFrame")
+        self.main_notebook.add(tab_mode_settings, text="  ⚙  Mode Settings  ")
+        self._build_mode_settings_tab(tab_mode_settings)
 
         self.on_mode_change() # Init state
         self.poll_status()
@@ -655,6 +642,39 @@ class GuiApp:
             
         self.refresh_session_list() # Init session list
         self.refresh_midi_list()    # Init MIDI list
+        
+        # Setup global smart mousewheel routing
+        self._setup_smart_mousewheel()
+
+    def _setup_smart_mousewheel(self):
+        """Setup intelligent mousewheel routing based on cursor position"""
+        def smart_mousewheel(event):
+            # Get the widget under the mouse
+            x, y = self.root.winfo_pointerx(), self.root.winfo_pointery()
+            widget = self.root.winfo_containing(x, y)
+            
+            if not widget:
+                return
+            
+            # Check which scrollable canvas hierarchy the widget belongs to
+            for name, canvas, container in self.scrollable_canvases:
+                # Walk up the widget hierarchy to see if we're inside this canvas
+                current = widget
+                while current:
+                    if current == canvas or current == container:
+                        # Found it! Scroll this canvas
+                        try:
+                            canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+                        except:
+                            pass
+                        return
+                    try:
+                        current = current.master
+                    except:
+                        break
+        
+        # Bind globally but route smartly
+        self.root.bind_all("<MouseWheel>", smart_mousewheel)
 
     def _draw_led(self, x, y, l, c):
         """Draw an LED indicator with enhanced styling"""
@@ -689,7 +709,7 @@ class GuiApp:
     def get_midi_files(self):
         """Scans midi_files/ directory."""
         try:
-            return [f.name for f in Path(__file__).resolve().parent.parent.joinpath("midi_files").glob("*.mid")]
+            return [f.name for f in get_midi_dir().glob("*.mid")]
         except: return []
 
     def refresh_midi_list(self):
@@ -698,7 +718,7 @@ class GuiApp:
 
     def _refresh_model_list(self):
         """Scan for available prediction models (base + user heads)."""
-        models_dir = Path(__file__).resolve().parent.parent / "research" / "LightGBM" / "results" / "models"
+        models_dir = get_models_dir()
         model_options = []
         self._model_paths = {}  # Map display name -> actual path
         
@@ -731,50 +751,318 @@ class GuiApp:
     def on_bpm_slider_change(self, val):
         """Handle slider movement with real-time update."""
         bpm = float(val)
+        # Update the BPM label display
         self.bpm_val_label.configure(text=f"{int(bpm)} BPM")
         
         # If in manual mode and running, update immediately
         if self.mode_var.get() == "manual":
             if self.session_thread: 
                 self.session_thread.update_manual_bpm(bpm)
-            # We don't log every single slide event to avoid spam, 
-            # maybe just update label.
+            # We don't log every single slide event to avoid spam
+
+    def on_bpm_entry(self, event=None):
+        """Handle BPM entry."""
+        try:
+             bpm = float(self.bpm_str.get())
+             bpm = max(0, min(400, bpm))
+             self.manual_bpm_var.set(bpm)
+             self.on_bpm_slider_change(bpm)
+        except ValueError:
+             self.bpm_str.set(f"{int(self.manual_bpm_var.get())}")
+            
+    def on_random_slider_change(self, val):
+        """Update entry and backend when slider moves."""
+        display_value = float(val)  # 1-100
+        actual_value = display_value / 100.0  # Convert to 0.01-1.00
+        
+        self.rnd_val_str.set(f"{int(display_value)}")
+        
+        if self.mode_var.get() == "random" and self.session_thread:
+             self.session_thread.update_random_span(actual_value)
+
+    def on_gui_sync(self, key, value):
+        """Called by SubprocessManager when backend sends a sync packet."""
+        try:
+            if key == "MANUAL_BPM":
+                bpm = float(value)
+                # Update without triggering another command (idempotent anyway)
+                self.manual_bpm_var.set(bpm)
+                self.bpm_str.set(f"{int(bpm)}")
+                # If we were using the slider value directly for display, we're good.
+        except: pass
+
+    def on_random_span_entry(self, event=None):
+        """Update slider and backend when entry changes."""
+        try:
+             display_value = float(self.rnd_val_str.get())  # User enters 1-100
+             # Clamp to 1-100
+             display_value = max(1, min(100, display_value))
+             actual_value = display_value / 100.0  # Convert to 0.01-1.00
+             
+             self.random_span_display_var.set(display_value)  # Move slider
+             self.rnd_val_str.set(f"{int(display_value)}")  # Format nicely
+             
+             if self.mode_var.get() == "random" and self.session_thread:
+                 self.session_thread.update_random_span(actual_value)
+        except ValueError:
+             # Reset to slider value if invalid
+             self.rnd_val_str.set(f"{int(self.random_span_display_var.get())}")
             
     def get_selected_port(self):
         val = self.port_var.get() if not SERIAL_AVAILABLE else self.port_combo.get()
         return val.split(" - ")[0] if " - " in val else val
 
+    def validate_number(self, new_value):
+        """Allow only numeric input."""
+        if new_value == "": return True
+        try:
+            float(new_value)
+            return True
+        except ValueError:
+            return False
+
+    def _set_frame_state(self, frame, state):
+        """Recursively set state for all widgets in a frame."""
+        try: frame.configure(state=state)
+        except: pass
+        for child in frame.winfo_children():
+            try: child.configure(state=state)
+            except: pass
+            # Recurse for nested frames
+            if isinstance(child, ttk.Frame):
+                self._set_frame_state(child, state)
+
     def on_mode_change(self):
         m = self.mode_var.get()
+        
+        # Enable/disable manual BPM slider based on mode
+        manual_state = "normal" if m == "manual" else "disabled"
+        self._set_frame_state(self.manual_bpm_frame, manual_state)
+        
+        # Switch Mode on Backend (if session is running)
+        if not self.session_thread:
+            return
+            
         if m == "manual":
-            # Enable BPM controls
-            for child in self.manual_bpm_frame.winfo_children():
-                try: child.configure(state="normal")
-                except: pass
-            # Also the inner frames
-            for child in self.manual_bpm_frame.winfo_children():
-                if isinstance(child, ttk.Frame):
-                    for gc in child.winfo_children():
-                         try: gc.configure(state="normal")
-                         except: pass
+            self.session_thread.set_manual_mode(True)
+            # Apply current BPM immediately if switching to manual
+            val = self.manual_bpm_var.get()
+            self.on_bpm_slider_change(val)
             
-            if self.session_thread: self.session_thread.set_manual_mode(True)
+        elif m == "random":
+            self.session_thread.set_random_mode(True)
+            # Apply random span & gamify (convert display value 1-100 to actual 0.01-1.00)
+            display_val = self.random_span_display_var.get()
+            actual_val = display_val / 100.0
+            self.session_thread.update_random_span(actual_val)
+            self.session_thread.update_random_gamified(self.gamify_var.get())
+            # Sync simple mode settings
+            self.session_thread.update_random_simple_threshold(float(self.random_simple_threshold_var.get()))
+            self.session_thread.update_random_simple_steps(int(self.random_simple_steps_var.get()))
+            self.session_thread.update_random_simple_timeout(float(self.random_simple_timeout_var.get()))
+        
+        elif m == "hybrid":
+            self.session_thread.set_hybrid_mode(True)
+            # Apply current hybrid settings from GUI
+            self.session_thread.update_hybrid_lock_steps(int(self.hybrid_lock_var.get()))
+            self.session_thread.update_hybrid_unlock_time(float(self.hybrid_unlock_var.get()))
+            self.session_thread.update_hybrid_stability_threshold(float(self.hybrid_stability_var.get()))
+            self.session_thread.update_hybrid_unlock_threshold(float(self.hybrid_unlock_thres_var.get()))
             
-            # Apply current BPM
-            self.on_bpm_slider_change(self.manual_bpm_var.get())
-            
+        else: # dynamic
+            self.session_thread.set_dynamic_mode(True)
+             
+    def on_gamify_toggle(self):
+        """Called when gamify checkbox is toggled."""
+        is_gamified = self.gamify_var.get()
+        if is_gamified:
+            self.lbl_match_steps_header.configure(text="Match Hold Time")
+            self.lbl_match_steps_desc.configure(text="Hold target BPM for duration to match")
+            self.lbl_match_steps_sub.configure(text="seconds (5-100)")
         else:
-            # Disable BPM controls
-            for child in self.manual_bpm_frame.winfo_children():
-                 try: child.configure(state="disabled")
-                 except: pass
-            for child in self.manual_bpm_frame.winfo_children():
-                if isinstance(child, ttk.Frame):
-                    for gc in child.winfo_children():
-                         try: gc.configure(state="disabled")
-                         except: pass
+            self.lbl_match_steps_header.configure(text="Match Steps")
+            self.lbl_match_steps_desc.configure(text="Consecutive steps within threshold to hit target")
+            self.lbl_match_steps_sub.configure(text="steps (5-100)")
             
-            if self.session_thread: self.session_thread.set_manual_mode(False)
+        if self.session_thread:
+            self.session_thread.update_random_gamified(is_gamified)
+            # Send current values to ensure the backend uses the right mapping immediately
+            self.session_thread.update_random_simple_threshold(self.random_simple_threshold_var.get())
+            self.session_thread.update_random_simple_steps(self.random_simple_steps_var.get())
+            self.session_thread.update_random_simple_timeout(self.random_simple_timeout_var.get())
+
+    def on_random_simple_threshold_change(self, event=None):
+        """Called when random simple threshold is changed."""
+        try:
+            original = self.random_simple_threshold_var.get().strip()
+            if not original:
+                return
+            bpm = float(original)
+            
+            # Clamp to valid range
+            if bpm < 1.0:
+                self.log(f"⚠ Match Threshold too low: {bpm:.1f} → 1.0 (minimum)")
+                self.random_simple_threshold_var.set("1.0")
+                bpm = 1.0
+            elif bpm > 20.0:
+                self.log(f"⚠ Match Threshold too high: {bpm:.1f} → 20.0 (maximum)")
+                self.random_simple_threshold_var.set("20.0")
+                bpm = 20.0
+            
+            if self.session_thread:
+                self.session_thread.update_random_simple_threshold(bpm)
+            self.log(f"✓ Random Match Threshold: {bpm:.1f} BPM")
+        except ValueError:
+            if original:
+                self.log(f"❌ Invalid Match Threshold '{original}' - enter a number (1.0-20.0)")
+
+    def on_random_simple_steps_change(self, event=None):
+        """Called when random simple steps is changed."""
+        try:
+            original = self.random_simple_steps_var.get().strip()
+            if not original:
+                return
+            steps = int(original)
+            
+            # Clamp to valid range
+            if steps < 5:
+                self.log(f"⚠ Match Steps too low: {steps} → 5 (minimum)")
+                self.random_simple_steps_var.set("5")
+                steps = 5
+            elif steps > 100:
+                self.log(f"⚠ Match Steps too high: {steps} → 100 (maximum)")
+                self.random_simple_steps_var.set("100")
+                steps = 100
+            
+            if self.session_thread:
+                self.session_thread.update_random_simple_steps(steps)
+            self.log(f"✓ Random Match Steps: {steps}")
+        except ValueError:
+            if original:
+                self.log(f"❌ Invalid Match Steps '{original}' - enter a number (5-100)")
+
+    def on_random_simple_timeout_change(self, event=None):
+        """Called when random simple timeout is changed."""
+        try:
+            original = self.random_simple_timeout_var.get().strip()
+            if not original:
+                return
+            sec = float(original)
+            
+            # Clamp to valid range
+            if sec < 5.0:
+                self.log(f"⚠ Timeout too low: {sec:.1f} → 5.0 (minimum)")
+                self.random_simple_timeout_var.set("5.0")
+                sec = 5.0
+            elif sec > 300.0:
+                self.log(f"⚠ Timeout too high: {sec:.1f} → 300.0 (maximum)")
+                self.random_simple_timeout_var.set("300.0")
+                sec = 300.0
+            
+            if self.session_thread:
+                self.session_thread.update_random_simple_timeout(sec)
+            self.log(f"✓ Random Timeout: {sec:.1f}s")
+        except ValueError:
+            if original:
+                self.log(f"❌ Invalid Timeout '{original}' - enter a number (5.0-300.0)")
+
+    def on_hybrid_lock_change(self, event=None):
+        """Called when hybrid lock steps is changed."""
+        # Only validate on Return key, not FocusOut
+        if event and event.type == '10':  # FocusOut event
+            return
+            
+        try:
+            original = self.hybrid_lock_var.get().strip()
+            if not original:
+                return
+            steps = int(original)
+            
+            # Clamp to valid range
+            if steps < 2:
+                self.log(f"⚠ Lock Steps too low: {steps} → 2 (minimum)")
+                self.hybrid_lock_var.set("2")
+                steps = 2
+            elif steps > 20:
+                self.log(f"⚠ Lock Steps too high: {steps} → 20 (maximum)")
+                self.hybrid_lock_var.set("20")
+                steps = 20
+            
+            if self.session_thread:
+                self.session_thread.update_hybrid_lock_steps(steps)
+            self.log(f"✓ Hybrid Lock Steps: {steps}")
+        except ValueError:
+            if original:  # Only complain if they actually entered something invalid
+                self.log(f"❌ Invalid Lock Steps '{original}' - enter a number (2-20)")
+
+    def on_hybrid_unlock_change(self, event=None):
+        """Called when hybrid unlock time is changed (deprecated - not used)."""
+        pass  # Kept for compatibility but unused
+
+    def on_hybrid_stability_change(self, event=None):
+        """Called when hybrid stability threshold is changed."""
+        # Only validate on Return key, not FocusOut
+        if event and event.type == '10':  # FocusOut event
+            return
+            
+        try:
+            original = self.hybrid_stability_var.get().strip()
+            if not original:
+                return
+            bpm = float(original)
+            
+            # Clamp to valid range
+            if bpm < 1.0:
+                self.log(f"⚠ Stability Threshold too low: {bpm:.1f} → 1.0 (minimum)")
+                self.hybrid_stability_var.set("1.0")
+                bpm = 1.0
+            elif bpm > 10.0:
+                self.log(f"⚠ Stability Threshold too high: {bpm:.1f} → 10.0 (maximum)")
+                self.hybrid_stability_var.set("10.0")
+                bpm = 10.0
+            
+            if self.session_thread:
+                self.session_thread.update_hybrid_stability_threshold(bpm)
+            self.log(f"✓ Hybrid Stability Threshold: {bpm:.1f} BPM")
+        except ValueError:
+            if original:  # Only complain if they actually entered something invalid
+                self.log(f"❌ Invalid Stability Threshold '{original}' - enter a number (1.0-10.0)")
+
+    def on_hybrid_unlock_thres_change(self, event=None):
+        """Called when hybrid unlock threshold is changed."""
+        # Only validate on Return key, not FocusOut
+        if event and event.type == '10':  # FocusOut event
+            return
+            
+        try:
+            original = self.hybrid_unlock_thres_var.get().strip()
+            if not original:
+                return
+            bpm = float(original)
+            
+            # Clamp to valid range
+            if bpm < 5.0:
+                self.log(f"⚠ Unlock Threshold too low: {bpm:.1f} → 5.0 (minimum)")
+                self.hybrid_unlock_thres_var.set("5.0")
+                bpm = 5.0
+            elif bpm > 50.0:
+                self.log(f"⚠ Unlock Threshold too high: {bpm:.1f} → 50.0 (maximum)")
+                self.hybrid_unlock_thres_var.set("50.0")
+                bpm = 50.0
+            
+            if self.session_thread:
+                self.session_thread.update_hybrid_unlock_threshold(bpm)
+            self.log(f"✓ Hybrid Unlock Threshold: {bpm:.1f} BPM")
+        except ValueError:
+            if original:  # Only complain if they actually entered something invalid
+                self.log(f"❌ Invalid Unlock Threshold '{original}' - enter a number (5.0-50.0)")
+
+    def on_startup_mode_change(self):
+        """Show/hide walk steps input based on startup mode selection."""
+        if self.startup_mode_var.get() == "walk_first":
+            self.walk_steps_frame.pack(fill="x", pady=(0, 10), after=self.walk_steps_frame.master.winfo_children()[self.walk_steps_frame.master.winfo_children().index(self.walk_steps_frame)-1])
+        else:
+            self.walk_steps_frame.pack_forget()
 
     def start_session(self):
         """Action for the 'START SESSION' button."""
@@ -801,7 +1089,7 @@ class GuiApp:
             p = Path(m_name)
         else:
             # Try finding it in midi_files
-            p = Path(__file__).resolve().parent.parent / "midi_files" / m_name
+            p = get_midi_dir() / m_name
             
         if not p.exists(): messagebox.showerror("Error", f"MIDI not found: {m_name}"); return
         
@@ -847,6 +1135,15 @@ class GuiApp:
         # Get selected prediction model path
         model_path = self.get_selected_model_path()
         
+        # Get startup mode parameters
+        startup_mode = self.startup_mode_var.get()
+        walk_steps = None
+        if startup_mode == "walk_first":
+            try:
+                walk_steps = int(self.walk_steps_var.get())
+            except:
+                walk_steps = 10  # Default
+        
         # Create and start the Subprocess Manager
         self.session_thread = SubprocessManager(
             str(p),
@@ -862,7 +1159,20 @@ class GuiApp:
             alpha_up=au,
             alpha_down=ad,
             hybrid_mode=(self.mode_var.get() == "hybrid"),
+            random_mode=(self.mode_var.get() == "random"),
+            random_span=self.random_span_display_var.get() / 100.0,  # Convert display (1-100) to actual (0.01-1.00)
+            random_gamified=self.gamify_var.get(),
+            random_simple_threshold=self.random_simple_threshold_var.get(),
+            random_simple_steps=self.random_simple_steps_var.get(),
+            random_simple_timeout=self.random_simple_timeout_var.get(),
+            hybrid_lock_steps=self.hybrid_lock_var.get(),
+            hybrid_unlock_time=self.hybrid_unlock_var.get(),
+            hybrid_stability_threshold=self.hybrid_stability_var.get(),
+            hybrid_unlock_threshold=self.hybrid_unlock_thres_var.get(),
+            gui_sync_callback=self.on_gui_sync,
             model_path=model_path,
+            startup_mode=startup_mode,
+            walk_steps=walk_steps,
         )
         
         # Update UI state
@@ -884,7 +1194,7 @@ class GuiApp:
     def get_midi_files(self):
         """Scans midi_files/ directory."""
         try:
-            base_dir = Path(__file__).resolve().parent.parent / "midi_files"
+            base_dir = get_midi_dir()
             if not base_dir.exists(): return []
             return [f.name for f in base_dir.glob("*.mid")]
         except: return []
@@ -901,7 +1211,7 @@ class GuiApp:
         Ignores default timestamped folders (start with 'session_').
         """
         try:
-            log_dir = Path(__file__).resolve().parent.parent / "logs"
+            log_dir = get_logs_dir()
             if not log_dir.exists(): return []
             
             # Find folders that are NOT default sessions
@@ -939,7 +1249,7 @@ class GuiApp:
     def refresh_analysis_subjects(self):
         """Populate the first dropdown with Subject/Folder names."""
         try:
-            log_dir = Path(__file__).resolve().parent / "logs"
+            log_dir = get_logs_dir()
             if not log_dir.exists(): 
                 self.subject_combo['values'] = []
                 return
@@ -961,7 +1271,7 @@ class GuiApp:
         if not subject: return
         
         try:
-            log_dir = Path(__file__).resolve().parent / "logs" / subject
+            log_dir = get_logs_dir() / subject
             if not log_dir.exists():
                 self.session_combo['values'] = []
                 return
@@ -986,7 +1296,7 @@ class GuiApp:
             return
         
         # Construct path from both dropdowns
-        base_dir = Path(__file__).resolve().parent / "logs" / subject / session_name
+        base_dir = get_logs_dir() / subject / session_name
         plot_path = base_dir / "BPM_plot.png"
         
         if not plot_path.exists():
@@ -1399,7 +1709,7 @@ class GuiApp:
     def _refresh_training_sessions(self):
         """Scan logs directory and populate session tree."""
         self.session_tree.delete(*self.session_tree.get_children())
-        logs_dir = Path(__file__).resolve().parent / "logs"
+        logs_dir = get_logs_dir()
         if not logs_dir.exists():
             return
 
@@ -1505,7 +1815,7 @@ class GuiApp:
                 
                 if train_type == "base":
                     # Run train_lgbm.py with selected sessions
-                    script = Path(__file__).resolve().parent.parent / "research" / "LightGBM" / "train_lgbm.py"
+                    script = get_research_dir() / "LightGBM" / "train_lgbm.py"
                     cmd = [sys.executable, str(script), "--sessions-file", sessions_file.name]
                     # Add Optuna optimization if enabled
                     if use_optuna:
@@ -1513,7 +1823,7 @@ class GuiApp:
                         cmd.extend(["--trials", str(optuna_trials)])
                 else:
                     # Run train_user_head.py with selected sessions
-                    script = Path(__file__).resolve().parent.parent / "research" / "LightGBM" / "train_user_head.py"
+                    script = get_research_dir() / "LightGBM" / "train_user_head.py"
                     cmd = [sys.executable, str(script), "--sessions-file", sessions_file.name, "--suffix", user_head_name.replace(" ", "_")]
 
                 self.root.after(0, lambda: self._log_training(f"Running: {' '.join(cmd)}"))
@@ -1524,7 +1834,7 @@ class GuiApp:
                     stderr=subprocess.STDOUT,
                     text=True,
                     bufsize=1,
-                    cwd=str(Path(__file__).resolve().parent.parent)
+                    cwd=str(get_app_root())
                 )
                 self.training_process = proc
 
@@ -1577,7 +1887,7 @@ class GuiApp:
 
     def _view_training_results(self):
         """Open a window displaying training result plots."""
-        results_dir = Path(__file__).resolve().parent.parent / "research" / "LightGBM" / "results" / "plots"
+        results_dir = get_plots_dir()
         
         if not results_dir.exists():
             messagebox.showinfo("No Results", "No training results found. Run training first.")
@@ -1758,6 +2068,9 @@ class GuiApp:
         # Bind canvas resize to update plot display
         self.analysis_plot_canvas.bind("<Configure>", lambda e: self._on_analysis_canvas_resize())
         
+        # Register this canvas for smart mousewheel routing
+        self.scrollable_canvases.append(('analysis', self.analysis_plot_canvas, plot_scroll_frame))
+        
         # Initialize data
         self.root.after(100, self.refresh_analysis_subjects)
     
@@ -1782,7 +2095,7 @@ class GuiApp:
             return
         
         # Construct path from both dropdowns
-        base_dir = Path(__file__).resolve().parent / "logs" / subject / session_name
+        base_dir = get_logs_dir() / subject / session_name
         plot_path = base_dir / "BPM_plot.png"
         
         if not plot_path.exists():
@@ -1896,6 +2209,254 @@ class GuiApp:
         self.analysis_zoom_level = 1.0
         self._update_analysis_plot_display()
 
+    # ====================== MODE SETTINGS TAB ======================
+    def _build_mode_settings_tab(self, parent):
+        """Build the Mode Settings tab UI for configuring all modes."""
+        # Main container with scrolling
+        container = ttk.Frame(parent, style="TFrame")
+        container.pack(fill="both", expand=True, padx=30, pady=20)
+        
+        # Title
+        ttk.Label(container, text="⚙  Mode Configuration", style="H1.TLabel", 
+                 font=("Segoe UI", 20, "bold")).pack(anchor="w", pady=(0, 5))
+        ttk.Label(container, text="Configure advanced settings for each sync mode", 
+                 style="Sub.TLabel").pack(anchor="w", pady=(0, 20))
+        
+        # Use PanedWindow for scrollable content
+        canvas = tk.Canvas(container, bg=self.P["bg"], highlightthickness=0, bd=0)
+        scrollbar = ttk.Scrollbar(container, orient="vertical", command=canvas.yview, 
+                                 style="Vertical.TScrollbar")
+        scrollable_frame = ttk.Frame(canvas, style="TFrame")
+        
+        scrollable_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+        
+        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw", tags="inner")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        
+        # Fix width
+        def _configure_canvas(event):
+            canvas.itemconfig("inner", width=event.width)
+        canvas.bind("<Configure>", _configure_canvas)
+        
+        # Register this canvas for smart mousewheel routing
+        self.scrollable_canvases.append(('mode_settings', canvas, scrollable_frame))
+        
+        # ====================== RANDOM MODE SETTINGS ======================
+        random_card = ttk.Frame(scrollable_frame, style="Card.TFrame", padding=20)
+        random_card.pack(fill="x", pady=(0, 15))
+        
+        ttk.Label(random_card, text="🎲 RANDOM MODE SETTINGS", style="CardHeader.TLabel").pack(anchor="w", pady=(0, 10))
+        ttk.Label(random_card, text="Randomly shift the target BPM within a difficulty range", 
+                 style="CardSub.TLabel").pack(anchor="w", pady=(0, 15))
+        
+        # Random Span
+        ttk.Label(random_card, text="Difficulty Span", style="CardLabel.TLabel", 
+                 font=("Segoe UI", 10, "bold")).pack(anchor="w", pady=(5, 2))
+        ttk.Label(random_card, text="How far the target can drift from your pace (±%)", 
+                 style="CardSub.TLabel").pack(anchor="w", pady=(0, 5))
+        
+        span_frame = ttk.Frame(random_card, style="Card.TFrame")
+        span_frame.pack(fill="x", pady=(0, 15))
+        
+        # Use pre-initialized variables (already created in __init__)
+        span_slider = ttk.Scale(span_frame, from_=1, to=100, orient="horizontal",
+                               variable=self.random_span_display_var, command=self.on_random_slider_change)
+        span_slider.pack(fill="x", padx=5)
+        
+        span_entry_row = ttk.Frame(random_card, style="Card.TFrame")
+        span_entry_row.pack(fill="x", pady=(0, 15))
+        ttk.Label(span_entry_row, text="Current:", style="CardLabel.TLabel").pack(side="left")
+        span_entry = ttk.Entry(span_entry_row, textvariable=self.rnd_val_str, width=8)
+        span_entry.pack(side="left", padx=(10, 5))
+        span_entry.bind("<Return>", self.on_random_span_entry)
+        ttk.Label(span_entry_row, text="(1 = ±1%, 100 = ±100%)", style="CardSub.TLabel").pack(side="left", padx=(10, 0))
+        
+        # Gamify Toggle
+        ttk.Separator(random_card, orient="horizontal").pack(fill="x", pady=15)
+        
+        # Use pre-initialized gamify_var (already created in __init__)
+        gamify_check = ttk.Checkbutton(random_card, text="Enable Gamified Mode (Time-Based Matching)", 
+                                      variable=self.gamify_var, command=self.on_gamify_toggle)
+        gamify_check.pack(anchor="w", pady=(0, 10))
+        
+        ttk.Label(random_card, text="When disabled: Simple step-counting mode\nWhen enabled: Hold target BPM for duration", 
+                 style="CardSub.TLabel").pack(anchor="w", pady=(0, 15))
+        
+        # Simple Mode Settings
+        ttk.Label(random_card, text="Matching Parameters", style="CardLabel.TLabel", 
+                 font=("Segoe UI", 10, "bold")).pack(anchor="w", pady=(5, 2))
+        
+        # Match Threshold
+        ttk.Label(random_card, text="Match Threshold", style="CardLabel.TLabel", 
+                 font=("Segoe UI", 10, "bold")).pack(anchor="w", pady=(5, 2))
+        ttk.Label(random_card, text="How close your BPM needs to be to match the target", 
+                 style="CardSub.TLabel").pack(anchor="w", pady=(0, 5))
+        threshold_row = ttk.Frame(random_card, style="Card.TFrame")
+        threshold_row.pack(fill="x", pady=(0, 15))
+        threshold_entry = ttk.Entry(threshold_row, textvariable=self.random_simple_threshold_var, width=10, font=("Segoe UI", 10))
+        threshold_entry.pack(side="left", padx=(0, 5))
+        threshold_entry.bind("<Return>", self.on_random_simple_threshold_change)
+        ttk.Label(threshold_row, text="BPM (1.0-20.0)", style="CardLabel.TLabel", font=("Segoe UI", 9)).pack(side="left")
+        
+        # Match Steps/Duration (dynamic label based on gamify)
+        self.lbl_match_steps_header = ttk.Label(random_card, text="Match Steps", style="CardLabel.TLabel", 
+                 font=("Segoe UI", 10, "bold"))
+        self.lbl_match_steps_header.pack(anchor="w", pady=(5, 2))
+        self.lbl_match_steps_desc = ttk.Label(random_card, text="Consecutive steps within threshold to hit target", 
+                 style="CardSub.TLabel")
+        self.lbl_match_steps_desc.pack(anchor="w", pady=(0, 5))
+        steps_row = ttk.Frame(random_card, style="Card.TFrame")
+        steps_row.pack(fill="x", pady=(0, 15))
+        steps_entry = ttk.Entry(steps_row, textvariable=self.random_simple_steps_var, width=10, font=("Segoe UI", 10))
+        steps_entry.pack(side="left", padx=(0, 5))
+        steps_entry.bind("<Return>", self.on_random_simple_steps_change)
+        self.lbl_match_steps_sub = ttk.Label(steps_row, text="steps (5-100)", style="CardLabel.TLabel", font=("Segoe UI", 9))
+        self.lbl_match_steps_sub.pack(side="left")
+        
+        # Timeout
+        ttk.Label(random_card, text="Timeout", style="CardLabel.TLabel", 
+                 font=("Segoe UI", 10, "bold")).pack(anchor="w", pady=(5, 2))
+        ttk.Label(random_card, text="Time before generating a new random target if not matched", 
+                 style="CardSub.TLabel").pack(anchor="w", pady=(0, 5))
+        timeout_row = ttk.Frame(random_card, style="Card.TFrame")
+        timeout_row.pack(fill="x", pady=(0, 0))
+        timeout_entry = ttk.Entry(timeout_row, textvariable=self.random_simple_timeout_var, width=10, font=("Segoe UI", 10))
+        timeout_entry.pack(side="left", padx=(0, 5))
+        timeout_entry.bind("<Return>", self.on_random_simple_timeout_change)
+        ttk.Label(timeout_row, text="seconds (5.0-300.0)", style="CardLabel.TLabel", font=("Segoe UI", 9)).pack(side="left")
+        
+        # ====================== HYBRID MODE SETTINGS ======================
+        hybrid_card = ttk.Frame(scrollable_frame, style="Card.TFrame", padding=20)
+        hybrid_card.pack(fill="x", pady=(0, 15))
+        
+        ttk.Label(hybrid_card, text="🚀 HYBRID MODE SETTINGS", style="CardHeader.TLabel").pack(anchor="w", pady=(0, 10))
+        ttk.Label(hybrid_card, text="Start dynamic, lock when steady, unlock on deviation", 
+                 style="CardSub.TLabel").pack(anchor="w", pady=(0, 15))
+        
+        # Lock Steps
+        ttk.Label(hybrid_card, text="Lock Steps", style="CardLabel.TLabel", 
+                 font=("Segoe UI", 10, "bold")).pack(anchor="w", pady=(5, 2))
+        ttk.Label(hybrid_card, text="Consecutive stable steps before locking to music BPM", 
+                 style="CardSub.TLabel").pack(anchor="w", pady=(0, 5))
+        lock_row = ttk.Frame(hybrid_card, style="Card.TFrame")
+        lock_row.pack(fill="x", pady=(0, 15))
+        lock_entry = ttk.Entry(lock_row, textvariable=self.hybrid_lock_var, width=10, font=("Segoe UI", 10))
+        lock_entry.pack(side="left", padx=(0, 5))
+        lock_entry.bind("<Return>", self.on_hybrid_lock_change)
+        ttk.Label(lock_row, text="steps (2-20)", style="CardLabel.TLabel", font=("Segoe UI", 9)).pack(side="left")
+        
+        # Stability Threshold
+        ttk.Label(hybrid_card, text="Stability Threshold", style="CardLabel.TLabel", 
+                 font=("Segoe UI", 10, "bold")).pack(anchor="w", pady=(5, 2))
+        ttk.Label(hybrid_card, text="Maximum BPM variation to consider pace stable for locking", 
+                 style="CardSub.TLabel").pack(anchor="w", pady=(0, 5))
+        stability_row = ttk.Frame(hybrid_card, style="Card.TFrame")
+        stability_row.pack(fill="x", pady=(0, 15))
+        stability_entry = ttk.Entry(stability_row, textvariable=self.hybrid_stability_var, width=10, font=("Segoe UI", 10))
+        stability_entry.pack(side="left", padx=(0, 5))
+        stability_entry.bind("<Return>", self.on_hybrid_stability_change)
+        ttk.Label(stability_row, text="BPM (1.0-10.0)", style="CardLabel.TLabel", font=("Segoe UI", 9)).pack(side="left")
+        
+        # Unlock Threshold
+        ttk.Label(hybrid_card, text="Unlock Threshold", style="CardLabel.TLabel", 
+                 font=("Segoe UI", 10, "bold")).pack(anchor="w", pady=(5, 2))
+        ttk.Label(hybrid_card, text="BPM deviation from locked tempo to trigger immediate unlock", 
+                 style="CardSub.TLabel").pack(anchor="w", pady=(0, 5))
+        unlock_thres_row = ttk.Frame(hybrid_card, style="Card.TFrame")
+        unlock_thres_row.pack(fill="x", pady=(0, 0))
+        unlock_thres_entry = ttk.Entry(unlock_thres_row, textvariable=self.hybrid_unlock_thres_var, width=10, font=("Segoe UI", 10))
+        unlock_thres_entry.pack(side="left", padx=(0, 5))
+        unlock_thres_entry.bind("<Return>", self.on_hybrid_unlock_thres_change)
+        ttk.Label(unlock_thres_row, text="BPM (5.0-50.0)", style="CardLabel.TLabel", font=("Segoe UI", 9)).pack(side="left")
+        
+        # ====================== ADVANCED SETTINGS ======================
+        advanced_card = ttk.Frame(scrollable_frame, style="Card.TFrame", padding=20)
+        advanced_card.pack(fill="x", pady=(0, 15))
+        
+        ttk.Label(advanced_card, text="🔧 ADVANCED SETTINGS", style="CardHeader.TLabel").pack(anchor="w", pady=(0, 10))
+        ttk.Label(advanced_card, text="Fine-tune BPM smoothing, prediction model, and sensor config", 
+                 style="CardSub.TLabel").pack(anchor="w", pady=(0, 15))
+        
+        # Climbing (Speed Up)
+        ttk.Label(advanced_card, text="Climbing (Speed Up)", style="CardLabel.TLabel", 
+                 font=("Segoe UI", 10, "bold")).pack(anchor="w", pady=(5, 2))
+        
+        attack_row = ttk.Frame(advanced_card, style="Card.TFrame")
+        attack_row.pack(fill="x", pady=(0, 10))
+        
+        self.smoothing_up_var = tk.StringVar()
+        entry_up = ttk.Entry(attack_row, textvariable=self.smoothing_up_var, width=15)
+        entry_up.pack(side="left", padx=(0, 5))
+        self._bind_placeholder(entry_up, self.smoothing_up_var, "Default")
+        ttk.Button(attack_row, text="?", style="Help.TButton", width=2, command=self.show_attack_help).pack(side="left", padx=5)
+        
+        # Cascading (Slow Down)
+        ttk.Label(advanced_card, text="Cascading (Slow Down)", style="CardLabel.TLabel", 
+                 font=("Segoe UI", 10, "bold")).pack(anchor="w", pady=(5, 2))
+        
+        decay_row = ttk.Frame(advanced_card, style="Card.TFrame")
+        decay_row.pack(fill="x", pady=(0, 10))
+        
+        self.smoothing_down_var = tk.StringVar()
+        entry_down = ttk.Entry(decay_row, textvariable=self.smoothing_down_var, width=15)
+        entry_down.pack(side="left", padx=(0, 5))
+        self._bind_placeholder(entry_down, self.smoothing_down_var, "Default")
+        ttk.Button(decay_row, text="?", style="Help.TButton", width=2, command=self.show_decay_help).pack(side="left", padx=5)
+        
+        # Smoothing Window
+        ttk.Label(advanced_card, text="Smoothing Window", style="CardLabel.TLabel", 
+                 font=("Segoe UI", 10, "bold")).pack(anchor="w", pady=(5, 2))
+        window_row = ttk.Frame(advanced_card, style="Card.TFrame")
+        window_row.pack(fill="x", pady=(0, 10))
+        
+        self.step_window_var = tk.StringVar()
+        entry_win = ttk.Entry(window_row, textvariable=self.step_window_var, width=12)
+        entry_win.pack(side="left", padx=(0, 5))
+        self._bind_placeholder(entry_win, self.step_window_var, "Default")
+        ttk.Label(window_row, text="Steps", style="CardLabel.TLabel").pack(side="left", padx=(0, 5))
+        ttk.Button(window_row, text="?", style="Help.TButton", width=2, command=self.show_window_help).pack(side="left")
+        
+        # Update Stride
+        ttk.Label(advanced_card, text="Update Stride", style="CardLabel.TLabel", 
+                 font=("Segoe UI", 10, "bold")).pack(anchor="w", pady=(5, 2))
+        stride_row = ttk.Frame(advanced_card, style="Card.TFrame")
+        stride_row.pack(fill="x", pady=(0, 10))
+        
+        self.stride_var = tk.StringVar()
+        entry_stride = ttk.Entry(stride_row, textvariable=self.stride_var, width=12)
+        entry_stride.pack(side="left", padx=(0, 5))
+        self._bind_placeholder(entry_stride, self.stride_var, "Default")
+        ttk.Label(stride_row, text="Steps", style="CardLabel.TLabel").pack(side="left", padx=(0, 5))
+        ttk.Button(stride_row, text="?", style="Help.TButton", width=2, command=self.show_stride_help).pack(side="left")
+        
+        # Prediction Model
+        ttk.Label(advanced_card, text="Prediction Model", style="CardLabel.TLabel", 
+                 font=("Segoe UI", 10, "bold")).pack(anchor="w", pady=(5, 2))
+        model_row = ttk.Frame(advanced_card, style="Card.TFrame")
+        model_row.pack(fill="x", pady=(0, 10))
+        
+        self.model_var = tk.StringVar(value="Base Model")
+        self.model_combo = ttk.Combobox(model_row, textvariable=self.model_var, state="readonly", width=30)
+        self.model_combo.pack(side="left", padx=(0, 5))
+        ttk.Button(model_row, text="↻", style="Compact.TButton", width=3, command=self._refresh_model_list).pack(side="left")
+        self._refresh_model_list()
+        
+        # Calibration Margin
+        ttk.Label(advanced_card, text="Calibration Margin", style="CardLabel.TLabel", 
+                 font=("Segoe UI", 10, "bold")).pack(anchor="w", pady=(5, 2))
+        cali_frame = ttk.Frame(advanced_card, style="Card.TFrame")
+        cali_frame.pack(fill="x", pady=(0, 5))
+        
+        self.cal_margin_var = tk.StringVar(value="200")
+        ttk.Entry(cali_frame, textvariable=self.cal_margin_var, width=12).pack(side="left", padx=(0, 5))
+        ttk.Label(cali_frame, text="Units", style="CardLabel.TLabel").pack(side="left")
+
     # ====================== THEME TOGGLE ======================
     def toggle_theme(self):
         """Toggle between light and dark mode."""
@@ -1945,6 +2506,23 @@ class GuiApp:
         self._apply_theme_styles()
         
         self.log(f"Switched to {self.theme_mode.title()} Mode")
+
+    # ====================== NOTIFICATION SYSTEM ======================
+    def show_notification(self, message, duration=5000):
+        """Display a temporary notification at the top-right of the session tab."""
+        if not hasattr(self, 'notification_label'):
+            return
+        self.notification_label.configure(text=message, bg=self.P["warning"])
+        self.notification_label.place(relx=0.98, rely=0.02, anchor="ne")
+        
+        # Auto-hide after duration
+        if duration > 0:
+            self.root.after(duration, self.hide_notification)
+
+    def hide_notification(self):
+        """Hide the notification."""
+        if hasattr(self, 'notification_label'):
+            self.notification_label.place_forget()
 
     def _update_widget_colors(self, widget):
         """Recursively update widget backgrounds for theme."""
@@ -2022,6 +2600,8 @@ class GuiApp:
         style.map("Primary.TButton", background=[("active", self.P["accent_hover"])])
         style.configure("Danger.TButton", background=self.P["danger"], foreground="white")
         style.configure("Success.TButton", background=self.P["success"], foreground="white")
+        style.configure("Info.TButton", background="#3b82f6", foreground="white")
+        style.map("Info.TButton", background=[("active", "#2563eb")])
         secondary_bg = "#64748b" if self.theme_mode == "light" else "#475569"
         style.configure("Secondary.TButton", background=secondary_bg, foreground="white")
         style.map("Secondary.TButton", background=[("active", "#475569" if self.theme_mode == "light" else "#334155")])
@@ -2153,7 +2733,8 @@ class GuiApp:
 
     def show_attack_help(self):
         msg = ("Controls how fast the music SPEEDS UP when you accelerate.\n\n"
-               "Low (0.02) = Gradual climbing.\n"
+               "Low (0.05) = Gradual climbing.\n"
+               "Default (0.1) = Balanced response.\n"
                "High (0.20) = Snappy response.\n"
                "Note: 'Sprint Boost' will override this if you run very fast.")
         messagebox.showinfo("Climbing Smoothing", msg)
@@ -2208,7 +2789,18 @@ class GuiApp:
         if not self.is_app_active: return
 
         while not self.status_queue.empty():
-            self.log(self.status_queue.get_nowait())
+            msg = self.status_queue.get_nowait()
+            # Check for notification command
+            if msg.startswith("NOTIFICATION:"):
+                notification_text = msg.split(":", 1)[1]
+                # Add emojis for visual feedback
+                if "System ready" in notification_text or "Music started" in notification_text:
+                    notification_text = "✅ " + notification_text
+                elif "begin walking" in notification_text.lower() or "Collecting" in notification_text:
+                    notification_text = "⚠️ " + notification_text
+                self.show_notification(notification_text, duration=5000)
+            else:
+                self.log(msg)  # Regular log message
         self.job_status = self.root.after(200, self.poll_status)
         
     def poll_session_dir(self):

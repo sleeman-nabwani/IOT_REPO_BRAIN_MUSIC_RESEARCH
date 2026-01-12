@@ -1,0 +1,28 @@
+Session log started at 2026-01-03_00-24-22 (t=0.000)
+[00:00:00.000] DEBUG: Attempting to initialize MidiBeatSync...
+[00:00:00.475] DEBUG: MidiBeatSync initialized successfully.
+[00:00:00.477] Starting in RANDOM DRIFT MODE.
+[00:00:00.477] Run type: random
+[00:00:01.932] Prediction model enabled (LightGBM)
+[00:00:01.933] GAME: Difficulty updated to ±38%
+[00:00:01.934] Mode Activated: RandomMode
+[00:00:01.935] Session started
+[00:00:01.936] DEBUG: Attempting to open serial port COM5...
+[00:00:01.940] DEBUG: Serial port COM5 opened successfully.
+[00:00:02.440] Setting update stride to 1
+[00:00:02.544] Update stride set response: ACK,STRIDE,1
+[00:00:02.646] ACK,RESET received
+[00:00:02.749] ACK,START received
+[00:00:02.749] Session handshake completed
+[00:00:02.762] Running main loop...
+[00:00:02.764] GAME: New Target 104.0 BPM! Match it!
+[00:00:04.259] GAME: Matched! Hold it...
+[00:00:09.260] GAME: Success! Held for 5.0s.
+[00:00:09.261] GAME: New Target 61.7 BPM! Match it!
+[00:00:13.736] GAME: Matched! Hold it...
+[00:00:18.736] GAME: Success! Held for 5.0s.
+[00:00:18.737] GAME: New Target 94.1 BPM! Match it!
+[00:00:21.877] GAME: Matched! Hold it...
+[00:00:26.878] GAME: Success! Held for 5.0s.
+[00:00:26.878] GAME: New Target 63.3 BPM! Match it!
+[00:00:30.195] GAME: Matched! Hold it...

@@ -77,18 +77,22 @@ def save_static_plot(df, folder):
 
         df["step_event"] = True
 
-    # Drop invalid rows to prevent plotting errors
-    df.dropna(subset=["seconds", "walking_bpm", "song_bpm"], inplace=True)
+    # Drop invalid rows to prevent plotting errors (keep song_bpm NaN for calibration)
+    df.dropna(subset=["seconds", "walking_bpm"], inplace=True)
+    
+    nan_value = float("nan")
+    df["walking_plot"] = pd.to_numeric(df["walking_bpm"], errors='coerce')
+    df["song_bpm"] = pd.to_numeric(df["song_bpm"], errors='coerce')
+    
+    # Replace zero song BPM with NaN (calibration phase)
+    df["song_bpm"] = df["song_bpm"].replace(0, nan_value)
+    
     # Ensure chronological order (engine may emit out-of-order timestamps)
     try:
         df.sort_values("seconds", inplace=True, kind="mergesort")
         df.reset_index(drop=True, inplace=True)
     except Exception:
         pass
-
-    nan_value = float("nan")
-    df["walking_plot"] = pd.to_numeric(df["walking_bpm"], errors='coerce')
-    df["song_bpm"] = pd.to_numeric(df["song_bpm"], errors='coerce')
     
     if df.empty:
         print("No valid data to plot.")
@@ -126,6 +130,11 @@ def save_static_plot(df, folder):
     w_smooth = df["walking_bpm"].where(df["step_event"], float("nan"))
     # 2. Linear Interpolate to connect dots (limit_area='inside' prevents trailing line)
     df["walking_plot"] = w_smooth.interpolate(method='linear', limit_area='inside')
+    
+    # Only show song BPM when we have at least 2 valid points (prevents vertical artifacts)
+    valid_song_count = df["song_bpm"].notna().sum()
+    if valid_song_count < 2:
+        df["song_bpm"] = nan_value
 
     # Larger figure size for better visibility (Mimic PDF full screen)
     fig, axes = plt.subplots(2, 1, figsize=(9, 6), sharex=True)
@@ -335,8 +344,11 @@ class LivePlotter:
         s = pd.to_numeric(df["song_bpm"], errors='coerce')
         step_events = df["step_event"].copy() if "step_event" in df.columns else pd.Series([False] * len(df))
         
-        # Drop rows where time or song_bpm is NaN
-        valid_mask = t.notna() & s.notna()
+        # Replace zero song BPM with NaN (calibration phase)
+        s = s.replace(0, float("nan"))
+        
+        # Drop rows where time is invalid (keep song_bpm NaN - that's intentional)
+        valid_mask = t.notna()
         t = t[valid_mask].reset_index(drop=True)
         w = w[valid_mask].reset_index(drop=True)
         s = s[valid_mask].reset_index(drop=True)
@@ -363,20 +375,25 @@ class LivePlotter:
             s = s.iloc[idx].reset_index(drop=True)
             step_events = step_events.iloc[idx].reset_index(drop=True)
         
-        # Song BPM: only show when music is actually playing (non-zero values)
-        # Don't force it to start at t=0 if session hasn't begun
+        # Song BPM: Only plot from the SECOND valid point onward (eliminates vertical artifacts)
+        # The first point may differ from subsequent values, causing a vertical line
+        # Zeros have already been replaced with NaN above
         if len(t) == 0:
             return
         
-        # Find the first time when song actually starts (first non-zero song BPM)
-        first_song_idx = s[s > 0].first_valid_index() if (s > 0).any() else None
+        # Find indices of all valid song BPM values
+        valid_indices = s[s.notna()].index.tolist()
         
-        if first_song_idx is not None:
-            # Song has started - fill gaps from first song point onward
-            s = s.ffill().bfill()
+        # Create separate time/song arrays for the music line (skip first valid point)
+        if len(valid_indices) >= 3:
+            # Start from SECOND valid point (skip first to avoid vertical artifact)
+            start_idx = valid_indices[1]
+            t_song = t.iloc[start_idx:].reset_index(drop=True)
+            s_song = s.iloc[start_idx:].ffill().reset_index(drop=True)
         else:
-            # No song data yet - keep song BPM as NaN (won't display)
-            pass
+            # Not enough valid data - empty arrays
+            t_song = pd.Series([], dtype=float)
+            s_song = pd.Series([], dtype=float)
 
         # Walking BPM: show only where steps occurred, connect gaps only between steps
         w = w.where(step_events, float("nan"))
@@ -386,7 +403,7 @@ class LivePlotter:
         if self.line_song is None:
             # First run: Initialize the Line2D objects
             self.line_walker, = self.ax1.plot(t, w, color="#1f77b4", lw=2, label="Walker")
-            self.line_song, = self.ax1.plot(t, s, color="#10b981", lw=2, ls="--", label="Music")
+            self.line_song, = self.ax1.plot(t_song, s_song, color="#10b981", lw=2, ls="--", label="Music")
             
             # Additional optional reference lines
             self.line_double, = self.ax1.plot([], [], color="#8b5cf6", lw=1.5, ls=":", label="2x Song", alpha=0.7)
@@ -406,13 +423,13 @@ class LivePlotter:
         x_min = max(0, current_max - getattr(self, "view_window_sec", 240))
         self.ax1.set_xlim(x_min, current_max + 5)
         
-        # Calculate multiples
-        s_double = s * 2
-        s_half = s * 0.5
+        # Calculate multiples (from sliced song data)
+        s_double = s_song * 2
+        s_half = s_song * 0.5
         
         # Y-axis Auto-Scaling
         # We need to account for the new lines if they are visible
-        max_s = s.max() if len(s) > 0 and not pd.isna(s.max()) else 0
+        max_s = s_song.max() if len(s_song) > 0 and not pd.isna(s_song.max()) else 0
         max_w = w.max() if len(w) > 0 and not pd.isna(w.max()) else 0
         
         current_max = max(max_s, max_w)
@@ -452,15 +469,15 @@ class LivePlotter:
         # Update lines
         if self.line_song is not None:
             self.line_walker.set_data(t, w)
-            self.line_song.set_data(t, s)
+            self.line_song.set_data(t_song, s_song)  # Use sliced song data
             
             if self.show_double:
-                self.line_double.set_data(t, s_double)
+                self.line_double.set_data(t_song, s_double)
             else:
                 self.line_double.set_data([], [])
                 
             if self.show_half:
-                self.line_half.set_data(t, s_half)
+                self.line_half.set_data(t_song, s_half)
             else:
                 self.line_half.set_data([], [])
 

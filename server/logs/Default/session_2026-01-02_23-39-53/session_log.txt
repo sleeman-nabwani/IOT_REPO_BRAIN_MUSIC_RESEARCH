@@ -1,0 +1,67 @@
+Session log started at 2026-01-02_23-39-53 (t=0.000)
+[00:00:00.005] DEBUG: Attempting to initialize MidiBeatSync...
+[00:00:00.743] DEBUG: MidiBeatSync initialized successfully.
+[00:00:00.743] Starting in RANDOM DRIFT MODE.
+[00:00:00.745] Run type: random
+[00:00:02.570] Prediction model enabled (LightGBM)
+[00:00:02.572] Random Mode ENABLED (100-140 BPM)
+[00:00:02.573] Session started
+[00:00:02.575] DEBUG: Attempting to open serial port COM5...
+[00:00:02.578] DEBUG: Serial port COM5 opened successfully.
+[00:00:03.079] Setting update stride to 1
+[00:00:03.182] Update stride set response: ACK,STRIDE,1
+[00:00:03.288] ACK,RESET received
+[00:00:03.390] ACK,START received
+[00:00:03.390] Session handshake completed
+[00:00:03.404] Running main loop...
+[00:00:03.405] RANDOM: New Target 106.1 (Base: 120.0 ±24.0)
+[00:00:03.405] BPM sliding: 120.00 -> 112.76 (Target: 106.13)
+[00:00:06.144] Processed: BPM=107.33034888951033
+[00:00:06.381] Processed: BPM=260.87
+[00:00:06.543] Processed: BPM=303.03
+[00:00:06.689] Processed: BPM=332.1
+[00:00:06.856] Processed: BPM=377.36
+[00:00:06.859] BPM sliding: 112.04 -> 117.41 (Target: 378.09)
+[00:00:06.862] BPM sliding: 117.41 -> 119.15 (Target: 378.09)
+[00:00:06.864] BPM sliding: 119.15 -> 120.49 (Target: 378.09)
+[00:00:06.866] BPM sliding: 120.49 -> 121.82 (Target: 378.09)
+[00:00:06.869] BPM sliding: 121.82 -> 123.54 (Target: 378.09)
+[00:00:06.871] BPM sliding: 123.54 -> 125.26 (Target: 378.09)
+[00:00:06.874] BPM sliding: 125.26 -> 127.08 (Target: 378.09)
+[00:00:06.876] BPM sliding: 127.08 -> 128.38 (Target: 378.09)
+[00:00:06.879] BPM sliding: 128.38 -> 129.77 (Target: 378.09)
+[00:00:06.881] BPM sliding: 129.77 -> 131.05 (Target: 378.09)
+[00:00:06.883] BPM sliding: 131.05 -> 132.64 (Target: 378.09)
+[00:00:06.886] BPM sliding: 132.64 -> 134.27 (Target: 378.09)
+[00:00:06.888] BPM sliding: 134.27 -> 135.88 (Target: 378.09)
+[00:00:06.891] BPM sliding: 135.88 -> 137.14 (Target: 378.09)
+[00:00:06.893] BPM sliding: 137.14 -> 138.72 (Target: 378.09)
+[00:00:06.895] BPM sliding: 138.72 -> 139.96 (Target: 378.09)
+[00:00:06.897] BPM sliding: 139.96 -> 141.20 (Target: 378.09)
+[00:00:06.899] BPM sliding: 141.20 -> 142.44 (Target: 378.09)
+[00:00:06.902] BPM sliding: 142.44 -> 144.00 (Target: 378.09)
+[00:00:06.904] BPM sliding: 144.00 -> 145.23 (Target: 378.09)
+[00:00:06.908] BPM sliding: 145.23 -> 147.62 (Target: 378.09)
+[00:00:06.911] BPM sliding: 147.62 -> 149.11 (Target: 378.09)
+[00:00:06.913] BPM sliding: 149.11 -> 150.30 (Target: 378.09)
+[00:00:06.915] BPM sliding: 150.30 -> 151.47 (Target: 378.09)
+[00:00:06.917] BPM sliding: 151.47 -> 152.65 (Target: 378.09)
+[00:00:06.919] BPM sliding: 152.65 -> 153.81 (Target: 378.09)
+[00:00:06.921] BPM sliding: 153.81 -> 154.96 (Target: 378.09)
+[00:00:06.923] BPM sliding: 154.96 -> 156.11 (Target: 378.09)
+[00:00:06.925] BPM sliding: 156.11 -> 157.24 (Target: 378.09)
+[00:00:06.927] BPM sliding: 157.24 -> 158.36 (Target: 378.09)
+[00:00:06.929] BPM sliding: 158.36 -> 159.48 (Target: 378.09)
+[00:00:06.931] BPM sliding: 159.48 -> 160.61 (Target: 378.09)
+[00:00:06.933] BPM sliding: 160.61 -> 161.75 (Target: 378.09)
+[00:00:06.936] BPM sliding: 161.75 -> 163.13 (Target: 378.09)
+[00:00:07.017] Processed: BPM=378.95
+[00:00:07.020] BPM sliding: 201.31 -> 203.94 (Target: 379.79)
+[00:00:07.180] Processed: BPM=368.1
+[00:00:07.183] BPM sliding: 260.55 -> 262.70 (Target: 371.27)
+[00:00:07.344] Processed: BPM=369.61
+[00:00:07.346] BPM sliding: 297.47 -> 299.14 (Target: 368.27)
+[00:00:07.500] Processed: BPM=374.22
+[00:00:07.816] Processed: BPM=283.46
+[00:00:09.890] RANDOM: New Target 114.6 (Base: 120.0 ±24.0)
+[00:00:13.577] RANDOM: New Target 143.9 (Base: 120.0 ±24.0)

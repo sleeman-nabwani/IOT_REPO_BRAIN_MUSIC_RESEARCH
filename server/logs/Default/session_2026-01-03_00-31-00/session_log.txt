@@ -1,0 +1,67 @@
+Session log started at 2026-01-03_00-31-00 (t=0.000)
+[00:00:00.000] DEBUG: Attempting to initialize MidiBeatSync...
+[00:00:00.555] DEBUG: MidiBeatSync initialized successfully.
+[00:00:00.555] Starting in RANDOM DRIFT MODE.
+[00:00:00.555] Run type: random
+[00:00:02.081] Prediction model enabled (LightGBM)
+[00:00:02.082] GAME: Difficulty updated to ±20%
+[00:00:02.082] Mode Activated: RandomMode
+[00:00:02.084] Session started
+[00:00:02.084] DEBUG: Attempting to open serial port COM5...
+[00:00:02.149] DEBUG: Serial port COM5 opened successfully.
+[00:00:02.651] Setting update stride to 1
+[00:00:02.755] Update stride set response: ACK,STRIDE,1
+[00:00:02.856] ACK,RESET received
+[00:00:02.958] ACK,START received
+[00:00:02.958] Session handshake completed
+[00:00:02.967] Running main loop...
+[00:00:02.972] RANDOM: Mode switched to SIMPLE (Step-based)
+[00:00:02.974] GAME: New Target 73.1 BPM! Match it!
+[00:00:18.346] RANDOM: Mode switched to GAMIFIED
+[00:00:18.346] GAME: New Target 65.0 BPM! Match it!
+[00:00:19.144] GAME: Matched! Hold it...
+[00:00:29.145] GAME: Success! Held for 10.0s.
+[00:00:29.145] GAME: New Target 83.7 BPM! Match it!
+[00:00:30.931] GAME: Matched! Hold it...
+[00:00:33.419] GAME: Difficulty updated to ±21%
+[00:00:33.424] GAME: Difficulty updated to ±22%
+[00:00:33.431] GAME: Difficulty updated to ±22%
+[00:00:33.473] GAME: Difficulty updated to ±22%
+[00:00:33.477] GAME: Difficulty updated to ±24%
+[00:00:33.482] GAME: Difficulty updated to ±24%
+[00:00:33.490] GAME: Difficulty updated to ±25%
+[00:00:33.513] GAME: Difficulty updated to ±25%
+[00:00:33.521] GAME: Difficulty updated to ±26%
+[00:00:33.525] GAME: Difficulty updated to ±26%
+[00:00:33.534] GAME: Difficulty updated to ±27%
+[00:00:33.576] GAME: Difficulty updated to ±28%
+[00:00:33.581] GAME: Difficulty updated to ±30%
+[00:00:33.585] GAME: Difficulty updated to ±31%
+[00:00:33.588] GAME: Difficulty updated to ±31%
+[00:00:33.594] GAME: Difficulty updated to ±32%
+[00:00:33.601] GAME: Difficulty updated to ±32%
+[00:00:33.617] GAME: Difficulty updated to ±32%
+[00:00:33.624] GAME: Difficulty updated to ±33%
+[00:00:33.632] GAME: Difficulty updated to ±33%
+[00:00:33.687] GAME: Difficulty updated to ±33%
+[00:00:33.692] GAME: Difficulty updated to ±34%
+[00:00:33.694] GAME: Difficulty updated to ±34%
+[00:00:33.699] GAME: Difficulty updated to ±35%
+[00:00:35.800] GAME: Difficulty updated to ±36%
+[00:00:35.805] GAME: Difficulty updated to ±50%
+[00:00:35.809] GAME: Difficulty updated to ±50%
+[00:00:35.813] GAME: Difficulty updated to ±50%
+[00:00:35.820] GAME: Difficulty updated to ±50%
+[00:00:35.830] GAME: Difficulty updated to ±50%
+[00:00:35.837] GAME: Difficulty updated to ±50%
+[00:00:35.843] GAME: Difficulty updated to ±50%
+[00:00:35.851] GAME: Difficulty updated to ±50%
+[00:00:35.858] GAME: Difficulty updated to ±50%
+[00:00:35.909] GAME: Difficulty updated to ±50%
+[00:00:35.914] GAME: Difficulty updated to ±50%
+[00:00:40.932] GAME: Success! Held for 10.0s.
+[00:00:40.932] GAME: New Target 115.7 BPM! Match it!
+[00:00:44.065] GAME: Matched! Hold it...
+[00:00:54.067] GAME: Success! Held for 10.0s.
+[00:00:54.067] GAME: New Target 62.1 BPM! Match it!
+[00:00:59.678] GAME: Matched! Hold it...

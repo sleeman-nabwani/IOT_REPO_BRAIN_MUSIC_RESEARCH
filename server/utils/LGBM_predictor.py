@@ -4,6 +4,7 @@ import threading
 import joblib
 import numpy as np
 import warnings
+from .paths import get_models_dir
 
 # Suppress "X does not have valid feature names" warning from LightGBM/Sklearn
 warnings.filterwarnings("ignore", category=UserWarning, message=".*X does not have valid feature names.*")
@@ -17,14 +18,7 @@ class LGBMPredictor:
     """
 
     def __init__(self, model_path=None, run_type=None):
-        default = (
-            Path(__file__).resolve().parent.parent.parent
-            / "research"
-            / "LightGBM"
-            / "results"
-            / "models"
-            / "lgbm_model.joblib"
-        )
+        default = get_models_dir() / "lgbm_model.joblib"
         self.model_path = Path(model_path or default)
         self.model = None
         self.scaler = None

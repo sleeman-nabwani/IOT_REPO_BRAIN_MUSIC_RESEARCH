@@ -4,6 +4,7 @@ import datetime
 import time
 import sys
 import json
+from .paths import get_logs_dir
 
 def _format_elapsed(seconds: float) -> str:
     hours = int(seconds // 3600)
@@ -31,11 +32,11 @@ class Logger:
             # Sanitize name
             safe_name = "".join([c for c in session_name if c.isalnum() or c in (' ', '_', '-')]).strip()
             # logs/NAME/session_TIMESTAMP (Patient History)
-            self.parent_dir = Path(__file__).resolve().parent.parent / "logs" / safe_name
+            self.parent_dir = get_logs_dir() / safe_name
             self.path = self.parent_dir / f"session_{self.timestamp}"
         else:
             # logs/Default/session_TIMESTAMP
-            self.parent_dir = Path(__file__).resolve().parent.parent / "logs" / "Default"
+            self.parent_dir = get_logs_dir() / "Default"
             self.path = self.parent_dir / f"session_{self.timestamp}"
 
         #setting the path to the logs directory
@@ -83,11 +84,14 @@ class Logger:
             
     def log_data(
         self, timestamp: float, song_bpm: float, walking_bpm: float, step_event: bool = False, instant_bpm: float | None = None):
-        # Start timer when first data is logged (session actually begins)
-        if not self._timer_started and song_bpm > 0:
+        # Start timer on first data log (calibration or music start)
+        if not self._timer_started:
             self.start_time = timestamp
             self._timer_started = True
-            self.log("Session timer started - music is now playing")
+            if song_bpm > 0:
+                self.log("Session timer started - music is now playing")
+            else:
+                self.log("Session timer started - calibration phase")
         
         elapsed = self._elapsed_str(timestamp)
         ib = instant_bpm if step_event else ""
